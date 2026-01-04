@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub struct Task {
   pub is_completed: bool,
   pub description: String,
+  order: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +28,7 @@ impl TaskList {
       tasks: HashMap::new(),
     };
 
+    let mut order = 0;
     content.split("\n").for_each(|line| {
       let trimmed = line.trim();
 
@@ -38,8 +40,11 @@ impl TaskList {
             Task {
               is_completed,
               description,
+              order,
             },
           );
+          order += 1;
+
           return true;
         }
 
@@ -55,19 +60,22 @@ impl TaskList {
   }
 
   pub fn get_tasks(&self, list_option: GetTasksFilterOption) -> Vec<Task> {
-    if GetTasksFilterOption::All == list_option {
-      return self.tasks.values().cloned().collect();
-    }
-    self
-      .tasks
-      .values()
-      .filter(|task| match list_option {
-        GetTasksFilterOption::Completed => task.is_completed,
-        GetTasksFilterOption::Incomplete => !task.is_completed,
-        _ => unreachable!(),
-      })
-      .cloned()
-      .collect()
+    let mut cloned_tasks: Vec<Task> = match list_option {
+      GetTasksFilterOption::All => self.tasks.values().cloned().collect(),
+      _ => self
+        .tasks
+        .values()
+        .filter(|task| match list_option {
+          GetTasksFilterOption::Completed => task.is_completed,
+          GetTasksFilterOption::Incomplete => !task.is_completed,
+          _ => unreachable!(),
+        })
+        .cloned()
+        .collect(),
+    };
+
+    cloned_tasks.sort_by(|a, b| a.order.cmp(&b.order));
+    return cloned_tasks;
   }
 }
 
@@ -88,6 +96,7 @@ mod tests {
           Task {
             is_completed: false,
             description: "incomplete task".to_string(),
+            order: 0,
           },
         ),
         (
@@ -95,6 +104,7 @@ mod tests {
           Task {
             is_completed: true,
             description: "complete task".to_string(),
+            order: 1,
           },
         ),
       ]),
@@ -116,6 +126,7 @@ mod tests {
           Task {
             is_completed: false,
             description: one.clone(),
+            order: 0,
           },
         ),
         (
@@ -123,6 +134,7 @@ mod tests {
           Task {
             is_completed: true,
             description: two.clone(),
+            order: 1,
           },
         ),
         (
@@ -130,6 +142,7 @@ mod tests {
           Task {
             is_completed: false,
             description: three.clone(),
+            order: 2,
           },
         ),
       ]),
@@ -143,15 +156,8 @@ mod tests {
     assert!(completed_tasks.len() == 1);
 
     let incompleted_tasks = tasklist.get_tasks(GetTasksFilterOption::Incomplete);
-
-    let found_one = incompleted_tasks
-      .iter()
-      .find(|task| task.description == one);
-    assert!(found_one.is_some());
-
-    let found_three = incompleted_tasks
-      .iter()
-      .find(|task| task.description == three);
-    assert!(found_three.is_some());
+    assert_eq!(incompleted_tasks[0].description, "one");
+    assert_eq!(incompleted_tasks[1].description, "three");
+    assert!(incompleted_tasks.len() == 2);
   }
 }
