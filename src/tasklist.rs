@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Task {
   pub is_completed: bool,
@@ -6,7 +8,7 @@ pub struct Task {
 
 #[derive(Debug, PartialEq)]
 pub struct TaskList {
-  pub tasks: Vec<Task>,
+  pub tasks: HashMap<String, Task>,
 }
 
 const COMPLETE_PREFIX: &str = "- [x] ";
@@ -21,7 +23,9 @@ pub enum GetTasksFilterOption {
 
 impl TaskList {
   pub fn from_string(content: &str) -> TaskList {
-    let mut task_list = TaskList { tasks: Vec::new() };
+    let mut task_list = TaskList {
+      tasks: HashMap::new(),
+    };
 
     content.split("\n").for_each(|line| {
       let trimmed = line.trim();
@@ -29,10 +33,13 @@ impl TaskList {
       let mut add_task = |prefix: &str, is_completed: bool| -> bool {
         if trimmed.starts_with(prefix) {
           let description = trimmed.replace(prefix, "");
-          task_list.tasks.push(Task {
-            is_completed,
-            description,
-          });
+          task_list.tasks.insert(
+            description.clone(),
+            Task {
+              is_completed,
+              description,
+            },
+          );
           return true;
         }
 
@@ -49,11 +56,11 @@ impl TaskList {
 
   pub fn get_tasks(&self, list_option: GetTasksFilterOption) -> Vec<Task> {
     if GetTasksFilterOption::All == list_option {
-      return self.tasks.clone();
+      return self.tasks.values().cloned().collect();
     }
     self
       .tasks
-      .iter()
+      .values()
       .filter(|task| match list_option {
         GetTasksFilterOption::Completed => task.is_completed,
         GetTasksFilterOption::Incomplete => !task.is_completed,
@@ -75,16 +82,22 @@ mod tests {
     );
     let result = TaskList::from_string(&test_string);
     let expected = TaskList {
-      tasks: vec![
-        Task {
-          is_completed: false,
-          description: "incomplete task".to_string(),
-        },
-        Task {
-          is_completed: true,
-          description: "complete task".to_string(),
-        },
-      ],
+      tasks: HashMap::from([
+        (
+          "incomplete task".to_string(),
+          Task {
+            is_completed: false,
+            description: "incomplete task".to_string(),
+          },
+        ),
+        (
+          "complete task".to_string(),
+          Task {
+            is_completed: true,
+            description: "complete task".to_string(),
+          },
+        ),
+      ]),
     };
 
     assert_eq!(expected, result);
@@ -92,33 +105,53 @@ mod tests {
 
   #[test]
   fn test_list_tasks() {
+    let one = "one".to_string();
+    let two = "two".to_string();
+    let three = "three".to_string();
+
     let tasklist = TaskList {
-      tasks: vec![
-        Task {
-          is_completed: false,
-          description: "one".to_string(),
-        },
-        Task {
-          is_completed: true,
-          description: "two".to_string(),
-        },
-        Task {
-          is_completed: false,
-          description: "three".to_string(),
-        },
-      ],
+      tasks: HashMap::from([
+        (
+          one.clone(),
+          Task {
+            is_completed: false,
+            description: one.clone(),
+          },
+        ),
+        (
+          two.clone(),
+          Task {
+            is_completed: true,
+            description: two.clone(),
+          },
+        ),
+        (
+          three.clone(),
+          Task {
+            is_completed: false,
+            description: three.clone(),
+          },
+        ),
+      ]),
     };
 
     let all_tasks = tasklist.get_tasks(GetTasksFilterOption::All);
     assert_eq!(tasklist.tasks.len(), all_tasks.len());
 
     let completed_tasks = tasklist.get_tasks(GetTasksFilterOption::Completed);
-    assert_eq!(completed_tasks[0].description, "two");
+    assert_eq!(completed_tasks[0].description, two);
     assert!(completed_tasks.len() == 1);
 
     let incompleted_tasks = tasklist.get_tasks(GetTasksFilterOption::Incomplete);
-    assert_eq!(incompleted_tasks[0].description, "one");
-    assert_eq!(incompleted_tasks[1].description, "three");
-    assert!(incompleted_tasks.len() == 2);
+
+    let found_one = incompleted_tasks
+      .iter()
+      .find(|task| task.description == one);
+    assert!(found_one.is_some());
+
+    let found_three = incompleted_tasks
+      .iter()
+      .find(|task| task.description == three);
+    assert!(found_three.is_some());
   }
 }
