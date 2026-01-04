@@ -1,58 +1,48 @@
 use anyhow::Result;
+use clap::Parser;
 use env_logger;
-use std::fs::{OpenOptions, metadata};
-use std::io::{Read, Write};
+
+use crate::tasklist::{GetTasksFilterOption, TaskList};
 
 mod cli;
+mod markdown;
+mod tasklist;
 
-const TASKS_FILE: &str = "tasks.md";
+const TASKS_FILE: &'static str = "tasks.md";
 
 fn main() -> Result<()> {
   env_logger::init();
   let cli = cli::Cli::parse();
 
+  let md_file = markdown::File::from(TASKS_FILE);
+
   match &cli.command {
-    Command::Task(task_cmd) => match &task_cmd.command {
-      TaskCommand::Add { task } => {
-        write_task_to_file(&task)?;
-        println!("Task added: {}", task);
+    cli::Command::Tasks(task_cmd) => match &task_cmd.command {
+      cli::TaskCommand::Add { task } => {
+        let task_str = format!("- [ ] {}", task);
+        md_file.append_to_file(&task_str)?;
+        println!("Added task: {}", task);
       }
-      TaskCommand::List(args) => {
-        list_tasks()?;
+      cli::TaskCommand::List(args) => {
+        let contents = md_file.get_contents()?;
+
+        let tasklist = TaskList::from_string(&contents);
+
+        let mut list_option = GetTasksFilterOption::Incomplete;
+        if args.completed {
+          list_option = GetTasksFilterOption::Completed;
+        } else if args.all {
+          list_option = GetTasksFilterOption::All;
+        }
+
+        let tasks = tasklist.get_tasks(list_option);
+        tasks.iter().enumerate().for_each(|(i, task)| {
+          let check = if task.is_completed { "✓" } else { " " };
+          println!("{}: {} {}", i + 1, check, task.description)
+        });
       }
     },
-    Command::Status => println!("I don't know yet"),
+    cli::Command::Status => println!("I don't know yet"),
   }
-  Ok(())
-}
-
-fn write_task_to_file(task: &str) -> Result<()> {
-  let needs_newline = match metadata(TASKS_FILE) {
-    Ok(meta) => meta.len() > 0,
-    Err(_) => false,
-  };
-
-  let mut file = OpenOptions::new()
-    .append(true)
-    .create(true)
-    .open(TASKS_FILE)?;
-
-  let new_line = if needs_newline { "\n" } else { "" };
-  let task_str = format!("{}- [ ] {}", new_line, task);
-
-  file.write_all(task_str.as_bytes())?;
-
-  Ok(())
-}
-
-fn list_tasks(incomplete: bool, complete: bool) -> Result<()> {
-  let mut file = OpenOptions::new().read(true).open(TASKS_FILE)?;
-
-  let mut contents = String::new();
-  file.read_to_string(&mut contents)?;
-
-  println!("incomplete: {}, complete: {}", incomplete, complete);
-  println!("{}", contents);
-
   Ok(())
 }
