@@ -1,44 +1,15 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
 use env_logger;
 use std::fs::{OpenOptions, metadata};
 use std::io::{Read, Write};
 
+mod cli;
+
 const TASKS_FILE: &str = "tasks.md";
-
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
-struct Cli {
-  #[command(subcommand)]
-  command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-  Task(TaskArgs),
-  // Timer(TimerArgs),
-  // Note(NoteArgs),
-  Status,
-}
-
-#[derive(Args)]
-struct TaskArgs {
-  #[command(subcommand)]
-  command: TaskCommand,
-}
-
-#[derive(Subcommand)]
-enum TaskCommand {
-  Add {
-    #[arg(value_name = "TASK")]
-    task: String,
-  },
-  List,
-}
 
 fn main() -> Result<()> {
   env_logger::init();
-  let cli = Cli::parse();
+  let cli = cli::Cli::parse();
 
   match &cli.command {
     Command::Task(task_cmd) => match &task_cmd.command {
@@ -46,7 +17,7 @@ fn main() -> Result<()> {
         write_task_to_file(&task)?;
         println!("Task added: {}", task);
       }
-      TaskCommand::List => {
+      TaskCommand::List(args) => {
         list_tasks()?;
       }
     },
@@ -74,12 +45,13 @@ fn write_task_to_file(task: &str) -> Result<()> {
   Ok(())
 }
 
-fn list_tasks() -> Result<()> {
+fn list_tasks(incomplete: bool, complete: bool) -> Result<()> {
   let mut file = OpenOptions::new().read(true).open(TASKS_FILE)?;
 
   let mut contents = String::new();
   file.read_to_string(&mut contents)?;
 
+  println!("incomplete: {}, complete: {}", incomplete, complete);
   println!("{}", contents);
 
   Ok(())
