@@ -1,3 +1,5 @@
+use anyhow::{Result, anyhow};
+use regex::Regex;
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -10,10 +12,13 @@ pub struct Task {
 #[derive(Debug, PartialEq)]
 pub struct TaskList {
   pub tasks: HashMap<String, Task>,
+  cursor: usize,
 }
 
-const COMPLETE_PREFIX: &str = "- [x] ";
-const INCOMPLETE_PREFIX: &str = "- [ ] ";
+pub trait TaskListPersist {
+  fn load_tasks(&mut self) -> Result<TaskList>;
+  fn save_tasks(&self, tasks: &TaskList) -> Result<()>;
+}
 
 #[derive(PartialEq)]
 pub enum GetTasksFilterOption {
@@ -23,40 +28,58 @@ pub enum GetTasksFilterOption {
 }
 
 impl TaskList {
-  pub fn from_string(content: &str) -> TaskList {
+  pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
+      cursor: 0,
     };
 
-    let mut order = 0;
-    content.split("\n").for_each(|line| {
-      let trimmed = line.trim();
+    let re = Regex::new(r"-\s\[([\sxX])\]\s(.+)").unwrap();
 
-      let mut add_task = |prefix: &str, is_completed: bool| -> bool {
-        if trimmed.starts_with(prefix) {
-          let description = trimmed.replace(prefix, "");
-          task_list.tasks.insert(
-            description.clone(),
-            Task {
-              is_completed,
-              description,
-              order,
-            },
-          );
-          order += 1;
-
-          return true;
+    for line in lines.iter() {
+      if re.is_match(line) {
+        if let Some(caps) = re.captures(line) {
+          match (caps.get(1), caps.get(2)) {
+            (Some(c), Some(d)) => {
+              let description = d.as_str().trim().to_string();
+              task_list.tasks.insert(
+                description.clone(),
+                Task {
+                  is_completed: c.as_str() != " ",
+                  description,
+                  order: task_list.cursor,
+                },
+              );
+              task_list.cursor += 1;
+            }
+            _ => continue,
+          }
         }
-
-        false
-      };
-
-      if !add_task(COMPLETE_PREFIX, true) {
-        add_task(INCOMPLETE_PREFIX, false);
       }
-    });
+    }
 
-    task_list
+    Ok(task_list)
+  }
+
+  pub fn to_markdown(lines: &Vec<String>) {}
+
+  pub fn add_task(&mut self, description: String) -> Result<()> {
+    if self.tasks.contains_key(&description) {
+      return Err(anyhow!("Task already exists"));
+    }
+
+    self.tasks.insert(
+      description.clone(),
+      Task {
+        description,
+        is_completed: false,
+        order: self.cursor,
+      },
+    );
+
+    self.cursor += 1;
+
+    Ok(())
   }
 
   pub fn get_tasks(&self, list_option: GetTasksFilterOption) -> Vec<Task> {
@@ -84,12 +107,18 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_from_string() {
-    let test_string = String::from(
-      "hello\n- this is a note\n- [ ] incomplete task\n - [x] complete task  \nnothing",
-    );
-    let result = TaskList::from_string(&test_string);
+  fn test_from_markdown() {
+    let test_lines = vec![
+      String::from("hello"),
+      String::from("- this is a note"),
+      String::from("- [ ] incomplete task"),
+      String::from("- [x] complete task  "),
+      String::from("nothing"),
+    ];
+
+    let result = TaskList::from_markdown(&test_lines);
     let expected = TaskList {
+      cursor: 2,
       tasks: HashMap::from([
         (
           "incomplete task".to_string(),
@@ -110,7 +139,29 @@ mod tests {
       ]),
     };
 
-    assert_eq!(expected, result);
+    assert_eq!(expected, result.unwrap());
+  }
+
+  #[test]
+  fn test_add_task() {
+    let mut tasklist = TaskList {
+      cursor: 0,
+      tasks: HashMap::new(),
+    };
+
+    if let Err(err) = tasklist.add_task("test description".to_string()) {
+      panic!("{}", err);
+    }
+
+    let task = tasklist
+      .tasks
+      .get("test description")
+      .unwrap_or_else(|| panic!("Task is None"));
+
+    assert_eq!(task.description, "test description");
+    assert!(task.is_completed == false);
+    assert_eq!(task.order, 0);
+    assert_eq!(tasklist.cursor, 1);
   }
 
   #[test]
@@ -120,12 +171,13 @@ mod tests {
     let three = "three".to_string();
 
     let tasklist = TaskList {
+      cursor: 0,
       tasks: HashMap::from([
         (
           one.clone(),
           Task {
             is_completed: false,
-            description: one.clone(),
+            description: one,
             order: 0,
           },
         ),
@@ -133,7 +185,7 @@ mod tests {
           two.clone(),
           Task {
             is_completed: true,
-            description: two.clone(),
+            description: two,
             order: 1,
           },
         ),
@@ -141,7 +193,7 @@ mod tests {
           three.clone(),
           Task {
             is_completed: false,
-            description: three.clone(),
+            description: three,
             order: 2,
           },
         ),
@@ -152,7 +204,7 @@ mod tests {
     assert_eq!(tasklist.tasks.len(), all_tasks.len());
 
     let completed_tasks = tasklist.get_tasks(GetTasksFilterOption::Completed);
-    assert_eq!(completed_tasks[0].description, two);
+    assert_eq!(completed_tasks[0].description, "two");
     assert!(completed_tasks.len() == 1);
 
     let incompleted_tasks = tasklist.get_tasks(GetTasksFilterOption::Incomplete);
