@@ -19,6 +19,7 @@ impl<'a> File<'a> {
 
   pub fn write_file(&self) -> Result<()> {
     let mut file = OpenOptions::new()
+      .write(true)
       .truncate(true)
       .create(true)
       .open(&self.path)?;
@@ -51,7 +52,10 @@ impl<'a> TaskListPersist for File<'a> {
     Ok(tasklist)
   }
 
-  fn save_tasks(&self, tasklist: &TaskList) -> Result<()> {
-    unimplemented!()
+  fn save_tasks(&mut self, tasklist: &TaskList) -> Result<()> {
+    tasklist.to_markdown(&mut self.lines)?;
+    println!("tasks {:?}", &tasklist.tasks);
+    println!("lines {:?}", &self.lines);
+    self.write_file()
   }
 }

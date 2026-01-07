@@ -12,12 +12,13 @@ pub struct Task {
 #[derive(Debug, PartialEq)]
 pub struct TaskList {
   pub tasks: HashMap<String, Task>,
+  to_be_added: Vec<String>,
   cursor: usize,
 }
 
 pub trait TaskListPersist {
   fn load_tasks(&mut self) -> Result<TaskList>;
-  fn save_tasks(&self, tasks: &TaskList) -> Result<()>;
+  fn save_tasks(&mut self, tasks: &TaskList) -> Result<()>;
 }
 
 #[derive(PartialEq)]
@@ -27,17 +28,28 @@ pub enum GetTasksFilterOption {
   Incomplete,
 }
 
-const MD_RE: &'static str = r"-\s\[([\sxX])\]\s(.+)";
+const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
 
 impl TaskList {
+  pub fn from(tasks: HashMap<String, Task>) -> TaskList {
+    let cursor = tasks.len();
+
+    TaskList {
+      tasks,
+      cursor,
+      to_be_added: Vec::new(),
+    }
+  }
+
   pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
       cursor: 0,
+      to_be_added: Vec::new(),
     };
 
     for line in lines.iter() {
-      if let Some((c, d)) = get_md_captures(line)? {
+      if let Some((c, d)) = TaskList::get_md_captures(line)? {
         let description = d.trim().to_string();
         task_list.tasks.insert(
           description.clone(),
@@ -54,8 +66,16 @@ impl TaskList {
     Ok(task_list)
   }
 
-  pub fn to_markdown(lines: &mut Vec<String>) -> Result<()> {
-    for line in lines {}
+  pub fn to_markdown(&self, lines: &mut Vec<String>) -> Result<()> {
+    for i in 0..lines.len() {
+      if let Some((_, desc)) = TaskList::get_md_captures(lines[i].as_str())? {
+        if let Some(task) = self.tasks.get(desc) {
+          let check = if task.is_completed { "x" } else { " " };
+          let new_string = format!("- [{}] {}", check, task.description);
+          lines[i] = new_string;
+        }
+      }
+    }
 
     Ok(())
   }
@@ -97,6 +117,23 @@ impl TaskList {
     cloned_tasks.sort_by(|a, b| a.order.cmp(&b.order));
     return cloned_tasks;
   }
+
+  fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
+    let re = Regex::new(MD_RE)?;
+
+    let mut found = None;
+
+    if re.is_match(haystack) {
+      if let Some(caps) = re.captures(haystack) {
+        match (caps.get(1), caps.get(2)) {
+          (Some(c), Some(d)) => found = Some((c.as_str(), d.as_str())),
+          _ => {}
+        };
+      }
+    }
+
+    Ok(found)
+  }
 }
 
 #[cfg(test)]
@@ -114,37 +151,31 @@ mod tests {
     ];
 
     let result = TaskList::from_markdown(&test_lines);
-    let expected = TaskList {
-      cursor: 2,
-      tasks: HashMap::from([
-        (
-          "incomplete task".to_string(),
-          Task {
-            is_completed: false,
-            description: "incomplete task".to_string(),
-            order: 0,
-          },
-        ),
-        (
-          "complete task".to_string(),
-          Task {
-            is_completed: true,
-            description: "complete task".to_string(),
-            order: 1,
-          },
-        ),
-      ]),
-    };
+    let expected = TaskList::from(HashMap::from([
+      (
+        "incomplete task".to_string(),
+        Task {
+          is_completed: false,
+          description: "incomplete task".to_string(),
+          order: 0,
+        },
+      ),
+      (
+        "complete task".to_string(),
+        Task {
+          is_completed: true,
+          description: "complete task".to_string(),
+          order: 1,
+        },
+      ),
+    ]));
 
     assert_eq!(expected, result.unwrap());
   }
 
   #[test]
   fn test_add_task() {
-    let mut tasklist = TaskList {
-      cursor: 0,
-      tasks: HashMap::new(),
-    };
+    let mut tasklist = TaskList::from(HashMap::new());
 
     if let Err(err) = tasklist.add_task("test description".to_string()) {
       panic!("{}", err);
@@ -167,35 +198,32 @@ mod tests {
     let two = "two".to_string();
     let three = "three".to_string();
 
-    let tasklist = TaskList {
-      cursor: 0,
-      tasks: HashMap::from([
-        (
-          one.clone(),
-          Task {
-            is_completed: false,
-            description: one,
-            order: 0,
-          },
-        ),
-        (
-          two.clone(),
-          Task {
-            is_completed: true,
-            description: two,
-            order: 1,
-          },
-        ),
-        (
-          three.clone(),
-          Task {
-            is_completed: false,
-            description: three,
-            order: 2,
-          },
-        ),
-      ]),
-    };
+    let tasklist = TaskList::from(HashMap::from([
+      (
+        one.clone(),
+        Task {
+          is_completed: false,
+          description: one,
+          order: 0,
+        },
+      ),
+      (
+        two.clone(),
+        Task {
+          is_completed: true,
+          description: two,
+          order: 1,
+        },
+      ),
+      (
+        three.clone(),
+        Task {
+          is_completed: false,
+          description: three,
+          order: 2,
+        },
+      ),
+    ]));
 
     let all_tasks = tasklist.get_tasks(GetTasksFilterOption::All);
     assert_eq!(tasklist.tasks.len(), all_tasks.len());
@@ -209,21 +237,56 @@ mod tests {
     assert_eq!(incompleted_tasks[1].description, "three");
     assert!(incompleted_tasks.len() == 2);
   }
-}
 
-fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
-  let re = Regex::new(MD_RE)?;
+  #[test]
+  fn test_to_markdown() {
+    let tasklist = TaskList::from(HashMap::from([
+      (
+        "incomplete task".to_string(),
+        Task {
+          is_completed: true,
+          description: "updated task".to_string(),
+          order: 0,
+        },
+      ),
+      (
+        "complete task  ".to_string(),
+        Task {
+          is_completed: false,
+          description: "another updated task".to_string(),
+          order: 1,
+        },
+      ),
+      (
+        "new task".to_string(),
+        Task {
+          is_completed: false,
+          description: "a whole new task".to_string(),
+          order: 2,
+        },
+      ),
+    ]));
 
-  let mut found = None;
+    let mut test_lines = vec![
+      String::from("hello"),
+      String::from("- this is a note"),
+      String::from("- [ ] incomplete task"),
+      String::from("- [x] complete task  "),
+      String::from("nothing"),
+    ];
 
-  if re.is_match(haystack) {
-    if let Some(caps) = re.captures(haystack) {
-      match (caps.get(1), caps.get(2)) {
-        (Some(c), Some(d)) => found = Some((c.as_str(), d.as_str())),
-        _ => {}
-      };
-    }
+    let result = tasklist.to_markdown(&mut test_lines);
+    assert!(result.is_ok());
+
+    let expected = vec![
+      String::from("hello"),
+      String::from("- this is a note"),
+      String::from("- [x] updated task"),
+      String::from("- [ ] another updated task"),
+      String::from("nothing"),
+      String::from("- [ ] a whole new task"),
+    ];
+
+    assert_eq!(expected, test_lines);
   }
-
-  Ok(found)
 }

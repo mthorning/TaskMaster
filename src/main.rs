@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use env_logger;
 
-use crate::tasks::{GetTasksFilterOption, TaskList, TaskListPersist};
+use crate::tasks::{GetTasksFilterOption, TaskListPersist};
 
 mod cli;
 mod markdown;
