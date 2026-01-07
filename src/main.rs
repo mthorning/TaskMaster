@@ -18,13 +18,13 @@ fn main() -> Result<()> {
 
   match &cli.command {
     cli::Command::Tasks(task_cmd) => match &task_cmd.command {
-      cli::TaskCommand::Add { task } => {
-        let task_str = format!("- [ ] {}", task);
-        let tasklist = md_file.load_tasks()?;
-        // tasklist.add_task(&task_str)?;
-        // md_file.save_tasks(tasklist)?;
-        println!("Added task: {}", task);
+      cli::TaskCommand::Add { description } => {
+        let mut tasklist = md_file.load_tasks()?;
+        tasklist.add_task(description.to_owned())?;
+        md_file.save_tasks(&tasklist)?;
+        println!("Task added");
       }
+
       cli::TaskCommand::List(args) => {
         let tasklist = md_file.load_tasks()?;
 
@@ -48,6 +48,7 @@ fn main() -> Result<()> {
         });
       }
     },
+
     cli::Command::Status => println!("I don't know yet"),
   }
   Ok(())

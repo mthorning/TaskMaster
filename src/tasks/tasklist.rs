@@ -27,6 +27,8 @@ pub enum GetTasksFilterOption {
   Incomplete,
 }
 
+const MD_RE: &'static str = r"-\s\[([\sxX])\]\s(.+)";
+
 impl TaskList {
   pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
     let mut task_list = TaskList {
@@ -34,34 +36,29 @@ impl TaskList {
       cursor: 0,
     };
 
-    let re = Regex::new(r"-\s\[([\sxX])\]\s(.+)").unwrap();
-
     for line in lines.iter() {
-      if re.is_match(line) {
-        if let Some(caps) = re.captures(line) {
-          match (caps.get(1), caps.get(2)) {
-            (Some(c), Some(d)) => {
-              let description = d.as_str().trim().to_string();
-              task_list.tasks.insert(
-                description.clone(),
-                Task {
-                  is_completed: c.as_str() != " ",
-                  description,
-                  order: task_list.cursor,
-                },
-              );
-              task_list.cursor += 1;
-            }
-            _ => continue,
-          }
-        }
+      if let Some((c, d)) = get_md_captures(line)? {
+        let description = d.trim().to_string();
+        task_list.tasks.insert(
+          description.clone(),
+          Task {
+            is_completed: c != " ",
+            description,
+            order: task_list.cursor,
+          },
+        );
+        task_list.cursor += 1;
       }
     }
 
     Ok(task_list)
   }
 
-  pub fn to_markdown(lines: &Vec<String>) {}
+  pub fn to_markdown(lines: &mut Vec<String>) -> Result<()> {
+    for line in lines {}
+
+    Ok(())
+  }
 
   pub fn add_task(&mut self, description: String) -> Result<()> {
     if self.tasks.contains_key(&description) {
@@ -212,4 +209,21 @@ mod tests {
     assert_eq!(incompleted_tasks[1].description, "three");
     assert!(incompleted_tasks.len() == 2);
   }
+}
+
+fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
+  let re = Regex::new(MD_RE)?;
+
+  let mut found = None;
+
+  if re.is_match(haystack) {
+    if let Some(caps) = re.captures(haystack) {
+      match (caps.get(1), caps.get(2)) {
+        (Some(c), Some(d)) => found = Some((c.as_str(), d.as_str())),
+        _ => {}
+      };
+    }
+  }
+
+  Ok(found)
 }

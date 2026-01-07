@@ -9,7 +9,7 @@ pub struct TaskArgs {
 #[derive(Subcommand)]
 pub enum TaskCommand {
   /// Add a new task
-  Add { task: String },
+  Add { description: String },
   /// List tasks
   List(ListArgs),
 }
