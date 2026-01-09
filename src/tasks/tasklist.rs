@@ -1,18 +1,23 @@
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
+struct HashMapTask {
+  is_completed: bool,
+  description: Arc<str>,
+  order: usize,
+}
+
 pub struct Task {
   pub is_completed: bool,
   pub description: String,
-  order: usize,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct TaskList {
-  pub tasks: HashMap<String, Task>,
-  to_be_added: Vec<String>,
+  tasks: HashMap<Arc<str>, HashMapTask>,
+  to_be_added: Vec<Arc<str>>,
   cursor: usize,
 }
 
@@ -31,14 +36,29 @@ pub enum GetTasksFilterOption {
 const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
 
 impl TaskList {
-  pub fn from(tasks: HashMap<String, Task>) -> TaskList {
+  #[cfg(test)]
+  fn from(tasks: Vec<Task>) -> TaskList {
     let cursor = tasks.len();
 
-    TaskList {
-      tasks,
-      cursor,
+    let mut tasklist = TaskList {
+      tasks: HashMap::new(),
       to_be_added: Vec::new(),
+      cursor,
+    };
+
+    for (i, task) in tasks.into_iter().enumerate() {
+      let description: Arc<str> = Arc::from(task.description);
+      tasklist.tasks.insert(
+        description.clone(),
+        HashMapTask {
+          description,
+          is_completed: task.is_completed,
+          order: i,
+        },
+      );
     }
+
+    tasklist
   }
 
   pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
@@ -51,11 +71,13 @@ impl TaskList {
     for line in lines.iter() {
       if let Some((c, d)) = TaskList::get_md_captures(line)? {
         let description = d.trim().to_string();
+        let desc_arc: Arc<str> = Arc::from(description);
+
         task_list.tasks.insert(
-          description.clone(),
-          Task {
+          desc_arc.clone(),
+          HashMapTask {
             is_completed: c != " ",
-            description,
+            description: desc_arc,
             order: task_list.cursor,
           },
         );
@@ -67,32 +89,48 @@ impl TaskList {
   }
 
   pub fn to_markdown(&self, lines: &mut Vec<String>) -> Result<()> {
-    for i in 0..lines.len() {
-      if let Some((_, desc)) = TaskList::get_md_captures(lines[i].as_str())? {
-        if let Some(task) = self.tasks.get(desc) {
-          let check = if task.is_completed { "x" } else { " " };
-          let new_string = format!("- [{}] {}", check, task.description);
-          lines[i] = new_string;
-        }
+    let update_line = |desc: &str, line: &mut String| {
+      if let Some(task) = self.tasks.get(desc) {
+        let check = if task.is_completed { "x" } else { " " };
+        *line = format!("- [{}] {}", check, task.description);
       }
+    };
+
+    for line in lines.iter_mut() {
+      let line_slice: &str = line.as_str();
+
+      if let Some((_, description)) = TaskList::get_md_captures(line_slice)? {
+        let desc_owned = description.to_owned();
+        update_line(&desc_owned, line)
+      }
+    }
+
+    for arc_desc in &self.to_be_added {
+      lines.push(String::new());
+      let last_line = lines.last_mut().unwrap();
+      update_line(&*arc_desc, last_line);
     }
 
     Ok(())
   }
 
   pub fn add_task(&mut self, description: String) -> Result<()> {
-    if self.tasks.contains_key(&description) {
+    let desc_arc = Arc::from(description);
+
+    if self.tasks.contains_key(&desc_arc) {
       return Err(anyhow!("Task already exists"));
     }
 
     self.tasks.insert(
-      description.clone(),
-      Task {
-        description,
+      desc_arc.clone(),
+      HashMapTask {
+        description: desc_arc.clone(),
         is_completed: false,
         order: self.cursor,
       },
     );
+
+    self.to_be_added.push(desc_arc);
 
     self.cursor += 1;
 
@@ -100,22 +138,41 @@ impl TaskList {
   }
 
   pub fn get_tasks(&self, list_option: GetTasksFilterOption) -> Vec<Task> {
-    let mut cloned_tasks: Vec<Task> = match list_option {
-      GetTasksFilterOption::All => self.tasks.values().cloned().collect(),
-      _ => self
-        .tasks
-        .values()
-        .filter(|task| match list_option {
-          GetTasksFilterOption::Completed => task.is_completed,
-          GetTasksFilterOption::Incomplete => !task.is_completed,
+    struct HybridTask {
+      order: usize,
+      task: Task,
+    }
+
+    let mut hybrid_tasks: Vec<HybridTask> = Vec::new();
+
+    for h_task in self.tasks.values() {
+      hybrid_tasks.push(HybridTask {
+        task: Task {
+          description: (*h_task.description).to_string(),
+          is_completed: h_task.is_completed,
+        },
+        order: h_task.order,
+      });
+    }
+
+    hybrid_tasks.sort_by(|a, b| a.order.cmp(&b.order));
+
+    let filtered_hybrid_tasks = match list_option {
+      GetTasksFilterOption::All => hybrid_tasks,
+      _ => hybrid_tasks
+        .into_iter()
+        .filter(|hybrid_task| match list_option {
+          GetTasksFilterOption::Completed => hybrid_task.task.is_completed,
+          GetTasksFilterOption::Incomplete => !hybrid_task.task.is_completed,
           _ => unreachable!(),
         })
-        .cloned()
         .collect(),
     };
 
-    cloned_tasks.sort_by(|a, b| a.order.cmp(&b.order));
-    return cloned_tasks;
+    return filtered_hybrid_tasks
+      .into_iter()
+      .map(|fht| fht.task)
+      .collect();
   }
 
   fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
@@ -151,31 +208,23 @@ mod tests {
     ];
 
     let result = TaskList::from_markdown(&test_lines);
-    let expected = TaskList::from(HashMap::from([
-      (
-        "incomplete task".to_string(),
-        Task {
-          is_completed: false,
-          description: "incomplete task".to_string(),
-          order: 0,
-        },
-      ),
-      (
-        "complete task".to_string(),
-        Task {
-          is_completed: true,
-          description: "complete task".to_string(),
-          order: 1,
-        },
-      ),
-    ]));
+    let expected = TaskList::from(vec![
+      Task {
+        is_completed: false,
+        description: String::from("incomplete task"),
+      },
+      Task {
+        is_completed: true,
+        description: String::from("complete task"),
+      },
+    ]);
 
     assert_eq!(expected, result.unwrap());
   }
 
   #[test]
   fn test_add_task() {
-    let mut tasklist = TaskList::from(HashMap::new());
+    let mut tasklist = TaskList::from(Vec::new());
 
     if let Err(err) = tasklist.add_task("test description".to_string()) {
       panic!("{}", err);
@@ -186,92 +235,80 @@ mod tests {
       .get("test description")
       .unwrap_or_else(|| panic!("Task is None"));
 
-    assert_eq!(task.description, "test description");
+    assert_eq!("test description", &*task.description);
     assert!(task.is_completed == false);
-    assert_eq!(task.order, 0);
-    assert_eq!(tasklist.cursor, 1);
+    assert_eq!(0, task.order);
+    assert_eq!(1, tasklist.cursor);
   }
 
   #[test]
   fn test_list_tasks() {
-    let one = "one".to_string();
-    let two = "two".to_string();
-    let three = "three".to_string();
-
-    let tasklist = TaskList::from(HashMap::from([
-      (
-        one.clone(),
-        Task {
-          is_completed: false,
-          description: one,
-          order: 0,
-        },
-      ),
-      (
-        two.clone(),
-        Task {
-          is_completed: true,
-          description: two,
-          order: 1,
-        },
-      ),
-      (
-        three.clone(),
-        Task {
-          is_completed: false,
-          description: three,
-          order: 2,
-        },
-      ),
-    ]));
+    let tasklist = TaskList::from(vec![
+      Task {
+        is_completed: false,
+        description: String::from("one"),
+      },
+      Task {
+        is_completed: true,
+        description: String::from("two"),
+      },
+      Task {
+        is_completed: false,
+        description: String::from("three"),
+      },
+    ]);
 
     let all_tasks = tasklist.get_tasks(GetTasksFilterOption::All);
-    assert_eq!(tasklist.tasks.len(), all_tasks.len());
+    assert_eq!(all_tasks.len(), tasklist.tasks.len());
 
     let completed_tasks = tasklist.get_tasks(GetTasksFilterOption::Completed);
-    assert_eq!(completed_tasks[0].description, "two");
+    assert_eq!("two", &*completed_tasks[0].description);
     assert!(completed_tasks.len() == 1);
 
     let incompleted_tasks = tasklist.get_tasks(GetTasksFilterOption::Incomplete);
-    assert_eq!(incompleted_tasks[0].description, "one");
-    assert_eq!(incompleted_tasks[1].description, "three");
+    assert_eq!("one", &*incompleted_tasks[0].description);
+    assert_eq!("three", &*incompleted_tasks[1].description);
     assert!(incompleted_tasks.len() == 2);
   }
 
   #[test]
   fn test_to_markdown() {
-    let tasklist = TaskList::from(HashMap::from([
-      (
-        "incomplete task".to_string(),
-        Task {
-          is_completed: true,
-          description: "updated task".to_string(),
-          order: 0,
-        },
-      ),
-      (
-        "complete task  ".to_string(),
-        Task {
-          is_completed: false,
-          description: "another updated task".to_string(),
-          order: 1,
-        },
-      ),
-      (
-        "new task".to_string(),
-        Task {
-          is_completed: false,
-          description: "a whole new task".to_string(),
-          order: 2,
-        },
-      ),
-    ]));
+    let mut tasklist = TaskList::from(vec![
+      Task {
+        is_completed: true,
+        description: String::from("one"),
+      },
+      Task {
+        is_completed: false,
+        description: String::from("two"),
+      },
+    ]);
+
+    let orig_one = tasklist.tasks.get("one").unwrap();
+    tasklist.tasks.insert(
+      Arc::from("one"),
+      HashMapTask {
+        description: Arc::from("updated task"),
+        ..*orig_one
+      },
+    );
+
+    let orig_two = tasklist.tasks.get("two").unwrap();
+    tasklist.tasks.insert(
+      Arc::from("two"),
+      HashMapTask {
+        description: Arc::from("another updated task"),
+        ..*orig_two
+      },
+    );
+
+    tasklist.add_task(String::from("a whole new task")).unwrap();
 
     let mut test_lines = vec![
       String::from("hello"),
       String::from("- this is a note"),
-      String::from("- [ ] incomplete task"),
-      String::from("- [x] complete task  "),
+      String::from("- [ ] one"),
+      String::from("- [x] two"),
       String::from("nothing"),
     ];
 

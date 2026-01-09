@@ -54,8 +54,6 @@ impl<'a> TaskListPersist for File<'a> {
 
   fn save_tasks(&mut self, tasklist: &TaskList) -> Result<()> {
     tasklist.to_markdown(&mut self.lines)?;
-    println!("tasks {:?}", &tasklist.tasks);
-    println!("lines {:?}", &self.lines);
     self.write_file()
   }
 }
