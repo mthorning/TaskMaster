@@ -18,7 +18,6 @@ pub struct Task {
 pub struct TaskList {
   tasks: HashMap<Arc<str>, HashMapTask>,
   to_be_added: Vec<Arc<str>>,
-  cursor: usize,
 }
 
 pub trait TaskListPersist {
@@ -38,12 +37,9 @@ const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
 impl TaskList {
   #[cfg(test)]
   fn from(tasks: Vec<Task>) -> TaskList {
-    let cursor = tasks.len();
-
     let mut tasklist = TaskList {
       tasks: HashMap::new(),
       to_be_added: Vec::new(),
-      cursor,
     };
 
     for (i, task) in tasks.into_iter().enumerate() {
@@ -64,10 +60,10 @@ impl TaskList {
   pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
-      cursor: 0,
       to_be_added: Vec::new(),
     };
 
+    let mut cursor = 0;
     for line in lines.iter() {
       if let Some((c, d)) = TaskList::get_md_captures(line)? {
         let description = d.trim().to_string();
@@ -78,10 +74,10 @@ impl TaskList {
           HashMapTask {
             is_completed: c != " ",
             description: desc_arc,
-            order: task_list.cursor,
+            order: cursor,
           },
         );
-        task_list.cursor += 1;
+        cursor += 1;
       }
     }
 
@@ -126,13 +122,11 @@ impl TaskList {
       HashMapTask {
         description: desc_arc.clone(),
         is_completed: false,
-        order: self.cursor,
+        order: self.tasks.len(),
       },
     );
 
     self.to_be_added.push(desc_arc);
-
-    self.cursor += 1;
 
     Ok(())
   }
@@ -238,7 +232,7 @@ mod tests {
     assert_eq!("test description", &*task.description);
     assert!(task.is_completed == false);
     assert_eq!(0, task.order);
-    assert_eq!(1, tasklist.cursor);
+    assert_eq!(1, tasklist.tasks.len());
   }
 
   #[test]
