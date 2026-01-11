@@ -187,12 +187,14 @@ impl TaskList {
     Ok(found)
   }
 
-  pub fn toggle_task(&mut self, description: &str) {
+  pub fn toggle_task(&mut self, description: &str) -> Option<()> {
     if let Some(task) = self.tasks.get_mut(description) {
       task.is_completed = !task.is_completed;
+      return Some(());
     } else {
       println!("Task not found")
     }
+    None
   }
 
   pub fn find_by_desc(&self, partial_desc: &str, list_option: GetTasksFilterOption) -> Vec<Task> {

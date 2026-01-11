@@ -6,6 +6,12 @@ pub struct TaskIO<S: TaskListPersist> {
   storage: S,
 }
 
+enum TasksConfirmed {
+  None,
+  One(usize),
+  All,
+}
+
 impl<S: TaskListPersist> TaskIO<S> {
   pub fn new(storage: S) -> TaskIO<S> {
     TaskIO { storage }
@@ -53,11 +59,44 @@ impl<S: TaskListPersist> TaskIO<S> {
     };
 
     let tasks = tasklist.find_by_desc(partial_desc.as_str(), list_option);
+
+    match self.filter_confirmed(&tasks)? {
+      TasksConfirmed::None => {
+        println!("No tasks updated");
+      }
+      TasksConfirmed::One(idx) => {
+        if let Some(()) = tasklist.toggle_task(&tasks[idx].description) {
+          println!("Task updated");
+        }
+      }
+      TasksConfirmed::All => {
+        let mut updated = 0;
+        tasks
+          .iter()
+          .for_each(|task| match tasklist.toggle_task(&task.description) {
+            Some(()) => updated += 1,
+            None => println!("Unable to update: {}", &task.description),
+          });
+
+        println!(
+          "{} Task{} updated",
+          tasks.len(),
+          if tasks.len() == 1 { "" } else { "s" }
+        );
+      }
+    }
+
+    self.storage.save_tasklist(&tasklist)?;
+
+    Ok(())
+  }
+
+  fn filter_confirmed(&self, tasks: &Vec<Task>) -> Result<TasksConfirmed> {
     if tasks.len() > 0 {
       println!("Found {} matching tasks:", tasks.len());
     } else {
       println!("Found 0 matching tasks");
-      return Ok(());
+      return Ok(TasksConfirmed::None);
     }
     TaskIO::<S>::print_tasks(&tasks, tasks.len() > 1);
 
@@ -72,32 +111,20 @@ impl<S: TaskListPersist> TaskIO<S> {
     io::stdin().read_line(&mut answer)?;
     let trimmed_answer = answer.trim();
 
-    let mut message = String::from("No tasks updated");
     if trimmed_answer == "y" {
-      tasks
-        .iter()
-        .for_each(|task| tasklist.toggle_task(&task.description));
-
-      message = format!(
-        "{} Task{} updated",
-        tasks.len(),
-        if tasks.len() == 1 { "" } else { "s" }
-      );
+      return Ok(TasksConfirmed::All);
     }
 
     if tasks.len() > 1
-      && let Ok(idx) = trimmed_answer.parse::<usize>()
+      && let Ok(selection) = trimmed_answer.parse::<usize>()
     {
-      if idx > 0 && idx <= tasks.len() {
-        tasklist.toggle_task(&tasks[idx - 1].description);
-        message = format!("Task updated");
+      let idx = selection - 1;
+      if idx < tasks.len() {
+        return Ok(TasksConfirmed::One(idx));
       }
     }
 
-    self.storage.save_tasklist(&tasklist)?;
-    println!("{}", message);
-
-    Ok(())
+    Ok(TasksConfirmed::None)
   }
 
   fn print_tasks(tasks: &Vec<Task>, with_numbers: bool) {
