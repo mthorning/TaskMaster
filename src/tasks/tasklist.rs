@@ -9,6 +9,7 @@ struct HashMapTask {
   order: usize,
 }
 
+#[derive(Debug)]
 pub struct Task {
   pub is_completed: bool,
   pub description: String,
@@ -21,8 +22,8 @@ pub struct TaskList {
 }
 
 pub trait TaskListPersist {
-  fn load_tasks(&mut self) -> Result<TaskList>;
-  fn save_tasks(&mut self, tasks: &TaskList) -> Result<()>;
+  fn load_tasklist(&mut self) -> Result<TaskList>;
+  fn save_tasklist(&mut self, tasks: &TaskList) -> Result<()>;
 }
 
 #[derive(PartialEq)]
@@ -189,7 +190,22 @@ impl TaskList {
   pub fn toggle_task(&mut self, description: &str) {
     if let Some(task) = self.tasks.get_mut(description) {
       task.is_completed = !task.is_completed;
+    } else {
+      println!("Task not found")
     }
+  }
+
+  pub fn find_by_desc(&self, partial_desc: &str, list_option: GetTasksFilterOption) -> Vec<Task> {
+    let tasks = self.get_tasks(list_option);
+    tasks
+      .into_iter()
+      .filter(|task| {
+        task
+          .description
+          .to_lowercase()
+          .contains(&partial_desc.to_lowercase())
+      })
+      .collect()
   }
 }
 

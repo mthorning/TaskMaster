@@ -146,3 +146,46 @@ fn test_toggle_task() {
   tasklist.to_markdown(&mut lines).unwrap();
   assert_eq!(String::from("- [x] task"), lines[0]);
 }
+
+#[test]
+fn test_find_partial_matches() {
+  let tasklist = TaskList::from(vec![
+    Task {
+      is_completed: true,
+      description: String::from("This is a wibbly task"),
+    },
+    Task {
+      is_completed: false,
+      description: String::from("Another wibbly task"),
+    },
+    Task {
+      is_completed: false,
+      description: String::from("This is a wobbly task"),
+    },
+  ]);
+
+  assert_eq!(
+    2,
+    tasklist
+      .find_by_desc("wibbly", GetTasksFilterOption::All)
+      .len()
+  );
+  assert_eq!(
+    1,
+    tasklist
+      .find_by_desc("wibbly", GetTasksFilterOption::Completed)
+      .len()
+  );
+  assert_eq!(
+    1,
+    tasklist
+      .find_by_desc("wobbly", GetTasksFilterOption::All)
+      .len()
+  );
+  assert_eq!(
+    2,
+    tasklist
+      .find_by_desc("this", GetTasksFilterOption::All)
+      .len()
+  );
+}

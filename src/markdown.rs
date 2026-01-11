@@ -45,14 +45,14 @@ impl<'a> File<'a> {
 }
 
 impl<'a> TaskListPersist for File<'a> {
-  fn load_tasks(&mut self) -> Result<TaskList> {
+  fn load_tasklist(&mut self) -> Result<TaskList> {
     self.read_file()?;
     let tasklist = TaskList::from_markdown(&self.lines)?;
 
     Ok(tasklist)
   }
 
-  fn save_tasks(&mut self, tasklist: &TaskList) -> Result<()> {
+  fn save_tasklist(&mut self, tasklist: &TaskList) -> Result<()> {
     tasklist.to_markdown(&mut self.lines)?;
     self.write_file()
   }

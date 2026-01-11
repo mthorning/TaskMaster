@@ -12,6 +12,10 @@ pub enum TaskCommand {
   Add { description: String },
   /// List tasks
   List(ListArgs),
+  /// Complete a task
+  Complete { partial_desc: String },
+  /// Toggle a task
+  Toggle { partial_desc: String },
 }
 
 #[derive(Args)]
