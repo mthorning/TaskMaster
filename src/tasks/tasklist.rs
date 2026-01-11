@@ -19,6 +19,7 @@ pub struct Task {
 pub struct TaskList {
   tasks: HashMap<Arc<str>, HashMapTask>,
   to_be_added: Vec<Arc<str>>,
+  to_be_removed: Vec<Arc<str>>,
 }
 
 pub trait TaskListPersist {
@@ -33,6 +34,12 @@ pub enum GetTasksFilterOption {
   Incomplete,
 }
 
+pub enum TaskUpdateAction {
+  Toggle,
+  Delete,
+  Edit(String),
+}
+
 const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
 
 impl TaskList {
@@ -41,6 +48,7 @@ impl TaskList {
     let mut tasklist = TaskList {
       tasks: HashMap::new(),
       to_be_added: Vec::new(),
+      to_be_removed: Vec::new(),
     };
 
     for (i, task) in tasks.into_iter().enumerate() {
@@ -62,6 +70,7 @@ impl TaskList {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
       to_be_added: Vec::new(),
+      to_be_removed: Vec::new(),
     };
 
     let mut cursor = 0;
@@ -86,22 +95,35 @@ impl TaskList {
   }
 
   pub fn to_markdown(&self, lines: &mut Vec<String>) -> Result<()> {
-    let update_line = |desc: &str, line: &mut String| {
+    let update_line = |desc: &Arc<str>, line: &mut String| {
       if let Some(task) = self.tasks.get(desc) {
         let check = if task.is_completed { "x" } else { " " };
         *line = format!("- [{}] {}", check, task.description);
       }
     };
 
-    for line in lines.iter_mut() {
+    let mut lines_to_remove: Vec<usize> = Vec::new();
+
+    // Edit tasks
+    for (i, line) in lines.iter_mut().enumerate() {
       let line_slice: &str = line.as_str();
 
       if let Some((_, description)) = TaskList::get_md_captures(line_slice)? {
-        let desc_owned = description.to_owned();
-        update_line(&desc_owned, line)
+        let desc_arc = Arc::from(description);
+        if self.tasks.contains_key(&desc_arc) {
+          update_line(&desc_arc, line);
+        } else {
+          lines_to_remove.push(i);
+        }
       }
     }
 
+    // Remove deleted tasks
+    lines_to_remove.into_iter().for_each(|i| {
+      lines.remove(i);
+    });
+
+    // Add new tasks
     for arc_desc in &self.to_be_added {
       lines.push(String::new());
       let last_line = lines.last_mut().unwrap();
@@ -187,10 +209,25 @@ impl TaskList {
     Ok(found)
   }
 
-  pub fn toggle_task(&mut self, description: &str) -> Option<()> {
+  pub fn update_task(&mut self, action: &TaskUpdateAction, description: &str) -> Option<()> {
     if let Some(task) = self.tasks.get_mut(description) {
-      task.is_completed = !task.is_completed;
-      return Some(());
+      return match action {
+        TaskUpdateAction::Toggle => {
+          task.is_completed = !task.is_completed;
+          Some(())
+        }
+        TaskUpdateAction::Delete => match self.tasks.remove(description) {
+          Some(removed_task) => {
+            self.to_be_removed.push(removed_task.description);
+            Some(())
+          }
+          None => None,
+        },
+        TaskUpdateAction::Edit(new_description) => {
+          task.description = Arc::from(new_description.as_str());
+          Some(())
+        }
+      };
     } else {
       println!("Task not found")
     }

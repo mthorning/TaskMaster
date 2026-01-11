@@ -4,6 +4,7 @@ use std::io::{self, Write};
 
 pub struct TaskIO<S: TaskListPersist> {
   storage: S,
+  tasklist: TaskList,
 }
 
 enum TasksConfirmed {
@@ -13,22 +14,20 @@ enum TasksConfirmed {
 }
 
 impl<S: TaskListPersist> TaskIO<S> {
-  pub fn new(storage: S) -> TaskIO<S> {
-    TaskIO { storage }
+  pub fn new(mut storage: S) -> Result<TaskIO<S>> {
+    let tasklist = storage.load_tasklist()?;
+    Ok(TaskIO { storage, tasklist })
   }
 
   pub fn add(&mut self, task_description: &String) -> Result<()> {
-    let mut tasklist = self.storage.load_tasklist()?;
-    tasklist.add_task(task_description)?;
-    self.storage.save_tasklist(&tasklist)?;
+    self.tasklist.add_task(task_description)?;
+    self.save()?;
     println!("Task added");
 
     Ok(())
   }
 
   pub fn list(&mut self, completed: bool, all: bool) -> Result<()> {
-    let tasklist = self.storage.load_tasklist()?;
-
     let mut list_option = GetTasksFilterOption::Incomplete;
     if completed {
       list_option = GetTasksFilterOption::Completed;
@@ -41,7 +40,7 @@ impl<S: TaskListPersist> TaskIO<S> {
       GetTasksFilterOption::Completed => " completed",
       GetTasksFilterOption::Incomplete => " incomplete",
     };
-    let tasks = tasklist.get_tasks(list_option);
+    let tasks = self.tasklist.get_tasks(list_option);
     if tasks.len() == 0 {
       println!("No{} tasks found", task_type);
     }
@@ -51,32 +50,59 @@ impl<S: TaskListPersist> TaskIO<S> {
   }
 
   pub fn toggle(&mut self, partial_desc: &String, all: bool) -> Result<()> {
-    let mut tasklist = self.storage.load_tasklist()?;
     let list_option = if all {
       GetTasksFilterOption::All
     } else {
       GetTasksFilterOption::Incomplete
     };
 
-    let tasks = tasklist.find_by_desc(partial_desc.as_str(), list_option);
+    let tasks = self
+      .tasklist
+      .find_by_desc(partial_desc.as_str(), list_option);
 
-    match self.filter_confirmed(&tasks)? {
+    self.make_update(&tasks, &TaskUpdateAction::Toggle)?;
+
+    Ok(())
+  }
+
+  pub fn delete(&mut self, partial_desc: &String) -> Result<()> {
+    let tasks = self
+      .tasklist
+      .find_by_desc(partial_desc.as_str(), GetTasksFilterOption::All);
+
+    self.make_update(&tasks, &TaskUpdateAction::Delete)?;
+
+    Ok(())
+  }
+
+  pub fn edit(&mut self, partial_desc: &String, new_desc: &String) -> Result<()> {
+    let tasks = self
+      .tasklist
+      .find_by_desc(partial_desc.as_str(), GetTasksFilterOption::All);
+
+    self.make_update(&tasks, &TaskUpdateAction::Edit(new_desc.to_owned()))?;
+
+    Ok(())
+  }
+
+  fn make_update(&mut self, tasks: &Vec<Task>, action: &TaskUpdateAction) -> Result<()> {
+    match self.confirm_one_or_many(&tasks)? {
       TasksConfirmed::None => {
         println!("No tasks updated");
       }
       TasksConfirmed::One(idx) => {
-        if let Some(()) = tasklist.toggle_task(&tasks[idx].description) {
+        if let Some(()) = self.tasklist.update_task(action, &tasks[idx].description) {
           println!("Task updated");
         }
       }
       TasksConfirmed::All => {
         let mut updated = 0;
-        tasks
-          .iter()
-          .for_each(|task| match tasklist.toggle_task(&task.description) {
+        tasks.iter().for_each(
+          |task| match self.tasklist.update_task(action, &task.description) {
             Some(()) => updated += 1,
             None => println!("Unable to update: {}", &task.description),
-          });
+          },
+        );
 
         println!(
           "{} Task{} updated",
@@ -86,12 +112,18 @@ impl<S: TaskListPersist> TaskIO<S> {
       }
     }
 
-    self.storage.save_tasklist(&tasklist)?;
+    self.save()?;
 
     Ok(())
   }
 
-  fn filter_confirmed(&self, tasks: &Vec<Task>) -> Result<TasksConfirmed> {
+  fn save(&mut self) -> Result<()> {
+    self.storage.save_tasklist(&self.tasklist)?;
+
+    Ok(())
+  }
+
+  fn confirm_one_or_many(&self, tasks: &Vec<Task>) -> Result<TasksConfirmed> {
     if tasks.len() > 0 {
       println!("Found {} matching tasks:", tasks.len());
     } else {

@@ -134,17 +134,42 @@ fn test_to_markdown() {
 }
 
 #[test]
-fn test_toggle_task() {
-  let mut tasklist = TaskList::from(vec![Task {
-    description: String::from("task"),
-    is_completed: false,
-  }]);
+fn test_update_task() {
+  let mut tasklist = TaskList::from(vec![
+    Task {
+      description: String::from("task to toggle"),
+      is_completed: true,
+    },
+    Task {
+      description: String::from("task to delete"),
+      is_completed: false,
+    },
+    Task {
+      description: String::from("task to edit"),
+      is_completed: true,
+    },
+  ]);
 
-  tasklist.toggle_task(&String::from("task"));
+  tasklist.update_task(&TaskUpdateAction::Toggle, &String::from("task to toggle"));
+  tasklist.update_task(&TaskUpdateAction::Delete, &String::from("task to delete"));
+  tasklist.update_task(
+    &TaskUpdateAction::Edit(String::from("edited task")),
+    &String::from("task to edit"),
+  );
 
-  let mut lines = vec![String::from("- [ ] task")];
+  let mut lines = vec![
+    String::from("- [x] task to toggle"),
+    String::from("- [ ] task to delete"),
+    String::from("- [x] task to edit"),
+  ];
   tasklist.to_markdown(&mut lines).unwrap();
-  assert_eq!(String::from("- [x] task"), lines[0]);
+  assert_eq!(
+    vec![
+      String::from("- [ ] task to toggle"),
+      String::from("- [x] edited task"),
+    ],
+    lines
+  );
 }
 
 #[test]
