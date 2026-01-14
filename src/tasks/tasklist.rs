@@ -119,6 +119,7 @@ impl TaskList {
     }
 
     // Remove deleted tasks
+    lines_to_remove.reverse();
     lines_to_remove.into_iter().for_each(|i| {
       lines.remove(i);
     });

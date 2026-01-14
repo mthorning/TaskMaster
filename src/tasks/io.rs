@@ -106,8 +106,8 @@ impl<S: TaskListPersist> TaskIO<S> {
 
         println!(
           "{} Task{} updated",
-          tasks.len(),
-          if tasks.len() == 1 { "" } else { "s" }
+          updated,
+          if updated == 1 { "" } else { "s" }
         );
       }
     }
