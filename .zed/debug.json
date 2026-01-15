@@ -17,13 +17,13 @@
     "adapter": "CodeLLDB",
   },
   {
-    "label": "Add Task",
+    "label": "Edit Task",
     "build": {
       "command": "cargo",
       "args": ["build"],
     },
     "program": "$ZED_WORKTREE_ROOT/target/debug/taskmaster",
-    "args": ["tasks", "add", "wibble"],
+    "args": ["tasks", "edit", "ell"],
     // sourceLanguages is required for CodeLLDB (not GDB) when using Rust
     "sourceLanguages": ["rust"],
     "request": "launch",

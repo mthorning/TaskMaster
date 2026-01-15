@@ -1,6 +1,6 @@
+use crate::io;
 use crate::tasks::tasklist::*;
 use anyhow::Result;
-use std::io::{self, Write};
 
 pub struct TaskIO<S: TaskListPersist> {
   storage: S,
@@ -60,7 +60,7 @@ impl<S: TaskListPersist> TaskIO<S> {
       .tasklist
       .find_by_desc(partial_desc.as_str(), list_option);
 
-    self.make_update(&tasks, &TaskUpdateAction::Toggle)?;
+    self.make_update(&tasks, &TaskUpdateAction::Toggle, true)?;
 
     Ok(())
   }
@@ -70,23 +70,28 @@ impl<S: TaskListPersist> TaskIO<S> {
       .tasklist
       .find_by_desc(partial_desc.as_str(), GetTasksFilterOption::All);
 
-    self.make_update(&tasks, &TaskUpdateAction::Delete)?;
+    self.make_update(&tasks, &TaskUpdateAction::Delete, true)?;
 
     Ok(())
   }
 
-  pub fn edit(&mut self, partial_desc: &String, new_desc: &String) -> Result<()> {
+  pub fn edit(&mut self, partial_desc: &String) -> Result<()> {
     let tasks = self
       .tasklist
       .find_by_desc(partial_desc.as_str(), GetTasksFilterOption::All);
 
-    self.make_update(&tasks, &TaskUpdateAction::Edit(new_desc.to_owned()))?;
+    self.make_update(&tasks, &TaskUpdateAction::Edit, false)?;
 
     Ok(())
   }
 
-  fn make_update(&mut self, tasks: &Vec<Task>, action: &TaskUpdateAction) -> Result<()> {
-    match self.confirm_one_or_many(&tasks)? {
+  fn make_update(
+    &mut self,
+    tasks: &Vec<Task>,
+    action: &TaskUpdateAction,
+    allow_multiple: bool,
+  ) -> Result<()> {
+    match self.confirm_one_or_many(&tasks, allow_multiple, action)? {
       TasksConfirmed::None => {
         println!("No tasks updated");
       }
@@ -123,39 +128,61 @@ impl<S: TaskListPersist> TaskIO<S> {
     Ok(())
   }
 
-  fn confirm_one_or_many(&self, tasks: &Vec<Task>) -> Result<TasksConfirmed> {
-    if tasks.len() > 0 {
-      println!("Found {} matching tasks:", tasks.len());
-    } else {
-      println!("Found 0 matching tasks");
-      return Ok(TasksConfirmed::None);
-    }
-    TaskIO::<S>::print_tasks(&tasks, tasks.len() > 1);
+  fn confirm_one_or_many(
+    &self,
+    tasks: &Vec<Task>,
+    allow_multiple: bool,
+    action: &TaskUpdateAction,
+  ) -> Result<TasksConfirmed> {
+    let action_str = match action {
+      TaskUpdateAction::Toggle => "update",
+      TaskUpdateAction::Edit => "edit",
+      TaskUpdateAction::Delete => "delete",
+    };
 
-    if tasks.len() == 1 {
-      println!("\nUpdate task? (y/n)");
-    } else {
-      println!("\nUpdate all tasks? (y/n)\nOr select number of task to update");
-    }
+    let tasks_len = tasks.len();
+    match tasks_len {
+      0 => {
+        println!("Found 0 matching tasks");
+        return Ok(TasksConfirmed::None);
+      }
+      1 => {
+        println!("Found 1 matching task:");
+        TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+        let answer = io::prompt_user(&format!("\n{} task? (y/n)", action_str));
 
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    let trimmed_answer = answer.trim();
+        if answer == "y" {
+          return Ok(TasksConfirmed::One(0));
+        }
+      }
+      _ => {
+        let selected_num: String;
+        if allow_multiple {
+          println!("Found {} matching tasks:", tasks_len);
+          TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+          let answer = io::prompt_user(&format!(
+            "\n{} all tasks? (y/n)\nOr select number of task to update",
+            action_str
+          ));
 
-    if trimmed_answer == "y" {
-      return Ok(TasksConfirmed::All);
-    }
+          if answer == "y" {
+            return Ok(TasksConfirmed::All);
+          }
+          selected_num = answer;
+        } else {
+          println!("Found {} matching tasks:", tasks_len);
+          TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+          selected_num = io::prompt_user(&format!("\nSelect number of task to {}", action_str));
+        }
 
-    if tasks.len() > 1
-      && let Ok(selection) = trimmed_answer.parse::<usize>()
-    {
-      let idx = selection - 1;
-      if idx < tasks.len() {
-        return Ok(TasksConfirmed::One(idx));
+        if let Ok(selection) = selected_num.parse::<usize>() {
+          let idx = selection - 1;
+          if idx < tasks_len {
+            return Ok(TasksConfirmed::One(idx));
+          }
+        }
       }
     }
-
     Ok(TasksConfirmed::None)
   }
 

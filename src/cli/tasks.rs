@@ -19,10 +19,7 @@ pub enum TaskCommand {
   /// Delete
   Delete { partial_desc: String },
   /// Edit a task description
-  Edit {
-    partial_desc: String,
-    new_desc: String,
-  },
+  Edit { partial_desc: String },
 }
 
 #[derive(Args)]

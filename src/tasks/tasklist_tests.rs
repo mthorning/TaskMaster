@@ -152,24 +152,13 @@ fn test_update_task() {
 
   tasklist.update_task(&TaskUpdateAction::Toggle, &String::from("task to toggle"));
   tasklist.update_task(&TaskUpdateAction::Delete, &String::from("task to delete"));
-  tasklist.update_task(
-    &TaskUpdateAction::Edit(String::from("edited task")),
-    &String::from("task to edit"),
-  );
 
   let mut lines = vec![
     String::from("- [x] task to toggle"),
     String::from("- [ ] task to delete"),
-    String::from("- [x] task to edit"),
   ];
   tasklist.to_markdown(&mut lines).unwrap();
-  assert_eq!(
-    vec![
-      String::from("- [ ] task to toggle"),
-      String::from("- [x] edited task"),
-    ],
-    lines
-  );
+  assert_eq!(vec![String::from("- [ ] task to toggle"),], lines);
 }
 
 #[test]

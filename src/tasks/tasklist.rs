@@ -2,6 +2,8 @@ use anyhow::{Result, anyhow};
 use regex::Regex;
 use std::{collections::HashMap, sync::Arc};
 
+use crate::io;
+
 #[derive(Debug, PartialEq)]
 struct HashMapTask {
   is_completed: bool,
@@ -37,7 +39,7 @@ pub enum GetTasksFilterOption {
 pub enum TaskUpdateAction {
   Toggle,
   Delete,
-  Edit(String),
+  Edit,
 }
 
 const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
@@ -224,7 +226,8 @@ impl TaskList {
           }
           None => None,
         },
-        TaskUpdateAction::Edit(new_description) => {
+        TaskUpdateAction::Edit => {
+          let new_description = io::prompt_user("Enter the new description:");
           task.description = Arc::from(new_description.as_str());
           Some(())
         }

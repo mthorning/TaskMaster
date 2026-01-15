@@ -3,6 +3,7 @@ use clap::Parser;
 use env_logger;
 
 mod cli;
+mod io;
 mod markdown;
 mod tasks;
 
@@ -21,10 +22,7 @@ fn main() -> Result<()> {
       cli::TaskCommand::List(args) => task_io.list(args.completed, args.all)?,
       cli::TaskCommand::Toggle { partial_desc } => task_io.toggle(&partial_desc, true)?,
       cli::TaskCommand::Complete { partial_desc } => task_io.toggle(partial_desc, false)?,
-      cli::TaskCommand::Edit {
-        partial_desc,
-        new_desc,
-      } => task_io.edit(&partial_desc, new_desc)?,
+      cli::TaskCommand::Edit { partial_desc } => task_io.edit(&partial_desc)?,
       cli::TaskCommand::Delete { partial_desc } => task_io.delete(&partial_desc)?,
     },
     cli::Command::Status => unimplemented!(),
