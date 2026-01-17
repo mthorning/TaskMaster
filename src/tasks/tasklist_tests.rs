@@ -118,7 +118,7 @@ fn test_to_markdown() {
     String::from("nothing"),
   ];
 
-  let result = tasklist.to_markdown(&mut test_lines);
+  let result = tasklist.save_to_markdown(&mut test_lines);
   assert!(result.is_ok());
 
   let expected = vec![
@@ -157,7 +157,7 @@ fn test_update_task() {
     String::from("- [x] task to toggle"),
     String::from("- [ ] task to delete"),
   ];
-  tasklist.to_markdown(&mut lines).unwrap();
+  tasklist.save_to_markdown(&mut lines).unwrap();
   assert_eq!(vec![String::from("- [ ] task to toggle"),], lines);
 }
 

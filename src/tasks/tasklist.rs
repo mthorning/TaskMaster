@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow};
+use console::{StyledObject, style};
 use regex::Regex;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::io;
+use crate::tasks::io;
 
 #[derive(Debug, PartialEq)]
 struct HashMapTask {
@@ -53,22 +54,12 @@ impl TaskList {
       to_be_removed: Vec::new(),
     };
 
-    for (i, task) in tasks.into_iter().enumerate() {
-      let description: Arc<str> = Arc::from(task.description);
-      tasklist.tasks.insert(
-        description.clone(),
-        HashMapTask {
-          description,
-          is_completed: task.is_completed,
-          order: i,
-        },
-      );
-    }
+    tasklist.set_tasks(tasks);
 
     tasklist
   }
 
-  pub fn from_markdown(lines: &Vec<String>) -> Result<TaskList> {
+  pub fn from_markdown(md_lines: &Vec<String>) -> Result<TaskList> {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
       to_be_added: Vec::new(),
@@ -76,7 +67,7 @@ impl TaskList {
     };
 
     let mut cursor = 0;
-    for line in lines.iter() {
+    for line in md_lines.iter() {
       if let Some((c, d)) = TaskList::get_md_captures(line)? {
         let description = d.trim().to_string();
         let desc_arc: Arc<str> = Arc::from(description);
@@ -96,7 +87,7 @@ impl TaskList {
     Ok(task_list)
   }
 
-  pub fn to_markdown(&self, lines: &mut Vec<String>) -> Result<()> {
+  pub fn save_to_markdown(&self, md_lines: &mut Vec<String>) -> Result<()> {
     let update_line = |desc: &Arc<str>, line: &mut String| {
       if let Some(task) = self.tasks.get(desc) {
         let check = if task.is_completed { "x" } else { " " };
@@ -107,7 +98,7 @@ impl TaskList {
     let mut lines_to_remove: Vec<usize> = Vec::new();
 
     // Edit tasks
-    for (i, line) in lines.iter_mut().enumerate() {
+    for (i, line) in md_lines.iter_mut().enumerate() {
       let line_slice: &str = line.as_str();
 
       if let Some((_, description)) = TaskList::get_md_captures(line_slice)? {
@@ -123,13 +114,13 @@ impl TaskList {
     // Remove deleted tasks
     lines_to_remove.reverse();
     lines_to_remove.into_iter().for_each(|i| {
-      lines.remove(i);
+      md_lines.remove(i);
     });
 
     // Add new tasks
     for arc_desc in &self.to_be_added {
-      lines.push(String::new());
-      let last_line = lines.last_mut().unwrap();
+      md_lines.push(String::new());
+      let last_line = md_lines.last_mut().unwrap();
       update_line(&*arc_desc, last_line);
     }
 
@@ -195,6 +186,20 @@ impl TaskList {
       .collect();
   }
 
+  pub fn set_tasks(&mut self, tasks: Vec<Task>) {
+    for (i, task) in tasks.into_iter().enumerate() {
+      let description: Arc<str> = Arc::from(task.description);
+      self.tasks.insert(
+        description.clone(),
+        HashMapTask {
+          description,
+          is_completed: task.is_completed,
+          order: i,
+        },
+      );
+    }
+  }
+
   fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
     let re = Regex::new(MD_RE)?;
 
@@ -247,6 +252,20 @@ impl TaskList {
           .description
           .to_lowercase()
           .contains(&partial_desc.to_lowercase())
+      })
+      .collect()
+  }
+
+  pub fn tasks_to_print(tasks: &Vec<Task>) -> Vec<StyledObject<String>> {
+    tasks
+      .iter()
+      .map(|task| {
+        if task.is_completed {
+          let description = style(task.description.clone()).strikethrough();
+          style(format!("● {}", description)).green()
+        } else {
+          style(format!("○ {}", task.description.clone())).white()
+        }
       })
       .collect()
   }

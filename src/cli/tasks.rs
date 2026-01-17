@@ -11,14 +11,19 @@ pub enum TaskCommand {
   /// Add a new task
   Add { description: String },
   /// List tasks
+  #[command(alias = "l")]
   List(ListArgs),
+  /// Toggle task(s)
+  #[command(alias = "t")]
+  Toggle,
   /// Complete a task
-  Complete { partial_desc: String },
-  /// Toggle a task
-  Toggle { partial_desc: String },
+  #[command(alias = "c")]
+  Complete,
   /// Delete
+  #[command(alias = "d")]
   Delete { partial_desc: String },
   /// Edit a task description
+  #[command(alias = "e")]
   Edit { partial_desc: String },
 }
 

@@ -1,4 +1,4 @@
-use crate::io;
+use crate::tasks::io;
 use crate::tasks::tasklist::*;
 use anyhow::Result;
 
@@ -44,23 +44,31 @@ impl<S: TaskListPersist> TaskIO<S> {
     if tasks.len() == 0 {
       println!("No{} tasks found", task_type);
     }
-    TaskIO::<S>::print_tasks(&tasks, false);
+    io::print_tasks(&tasks);
 
     Ok(())
   }
 
-  pub fn toggle(&mut self, partial_desc: &String, all: bool) -> Result<()> {
+  pub fn toggle(&mut self, all: bool) -> Result<()> {
     let list_option = if all {
       GetTasksFilterOption::All
     } else {
       GetTasksFilterOption::Incomplete
     };
 
-    let tasks = self
-      .tasklist
-      .find_by_desc(partial_desc.as_str(), list_option);
+    // let tasks = self
+    //   .tasklist
+    //   .find_by_desc(partial_desc.as_str(), list_option);
+    //
+    // self
+    //   .tasklist
+    //   .set_tasks(io::toggle_tasks(self.tasklist.get_tasks(list_option)));
 
-    self.make_update(&tasks, &TaskUpdateAction::Toggle, true)?;
+    let mut tasks = self.tasklist.get_tasks(list_option);
+    io::toggle_tasks(&mut tasks)?;
+    self.tasklist.set_tasks(tasks);
+
+    // self.make_update(&tasks, &TaskUpdateAction::Toggle, true)?;
 
     Ok(())
   }
@@ -148,7 +156,7 @@ impl<S: TaskListPersist> TaskIO<S> {
       }
       1 => {
         println!("Found 1 matching task:");
-        TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+        io::print_tasks(&tasks);
         let answer = io::prompt_user(&format!("\n{} task? (y/n)", action_str));
 
         if answer == "y" {
@@ -159,7 +167,7 @@ impl<S: TaskListPersist> TaskIO<S> {
         let selected_num: String;
         if allow_multiple {
           println!("Found {} matching tasks:", tasks_len);
-          TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+          io::print_tasks(&tasks);
           let answer = io::prompt_user(&format!(
             "\n{} all tasks? (y/n)\nOr select number of task to update",
             action_str
@@ -171,7 +179,7 @@ impl<S: TaskListPersist> TaskIO<S> {
           selected_num = answer;
         } else {
           println!("Found {} matching tasks:", tasks_len);
-          TaskIO::<S>::print_tasks(&tasks, tasks_len > 1);
+          io::print_tasks(&tasks);
           selected_num = io::prompt_user(&format!("\nSelect number of task to {}", action_str));
         }
 
@@ -184,22 +192,5 @@ impl<S: TaskListPersist> TaskIO<S> {
       }
     }
     Ok(TasksConfirmed::None)
-  }
-
-  fn print_tasks(tasks: &Vec<Task>, with_numbers: bool) {
-    tasks.iter().enumerate().for_each(|(i, task)| {
-      let (status, description) = if task.is_completed {
-        ("●", format!("\x1b[9m{}\x1b[0m", task.description))
-      } else {
-        ("○", task.description.clone())
-      }; // can use ◐ for in-progress later
-
-      let numbers = if with_numbers {
-        format!("{}: ", i + 1)
-      } else {
-        String::new()
-      };
-      println!("{}{} {}", numbers, status, description)
-    });
   }
 }

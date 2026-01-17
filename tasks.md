@@ -1,6 +1,6 @@
 
 - [ ] my new taskxxxx
-- [ ] my second task
+- [x] my second task
 - [ ] my third task
 
-- [ ] jelly
+- [x] jelly

@@ -12,6 +12,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+  #[command(alias = "t")]
   Tasks(tasks::TaskArgs),
   // Timer(TimerArgs),
   // Note(NoteArgs),
