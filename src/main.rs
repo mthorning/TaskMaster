@@ -6,7 +6,7 @@ mod cli;
 mod markdown;
 mod tasks;
 
-const TASKS_FILE: &'static str = "tasks.md";
+const TASKS_FILE: &str = "tasks.md";
 
 fn main() -> Result<()> {
   env_logger::init();

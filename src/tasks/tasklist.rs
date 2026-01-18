@@ -34,13 +34,13 @@ pub enum GetTasksFilterOption {
   Incomplete,
 }
 
-pub enum TaskUpdateAction {
+pub enum TaskUpdateAction<'a> {
   Toggle,
   Delete,
-  Edit(String),
+  Edit(&'a str),
 }
 
-const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
+const MD_RE: &str = r"-\s\[([\sx])\]\s(.+)";
 
 impl TaskList {
   #[cfg(test)]
@@ -71,7 +71,7 @@ impl TaskList {
     }
   }
 
-  pub fn from_markdown(md_lines: &Vec<String>) -> Result<TaskList> {
+  pub fn from_markdown(md_lines: &[String]) -> Result<TaskList> {
     let mut task_list = TaskList {
       tasks: HashMap::new(),
       to_be_added: Vec::new(),
@@ -133,7 +133,7 @@ impl TaskList {
     for arc_desc in &self.to_be_added {
       md_lines.push(String::new());
       let last_line = md_lines.last_mut().unwrap();
-      update_line(&*arc_desc, last_line);
+      update_line(arc_desc, last_line);
     }
 
     Ok(())
@@ -192,10 +192,10 @@ impl TaskList {
         .collect(),
     };
 
-    return filtered_hybrid_tasks
+    filtered_hybrid_tasks
       .into_iter()
       .map(|fht| fht.task)
-      .collect();
+      .collect()
   }
 
   fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
@@ -203,13 +203,11 @@ impl TaskList {
 
     let mut found = None;
 
-    if re.is_match(haystack) {
-      if let Some(caps) = re.captures(haystack) {
-        match (caps.get(1), caps.get(2)) {
-          (Some(c), Some(d)) => found = Some((c.as_str(), d.as_str())),
-          _ => {}
-        };
-      }
+    if let Some(caps) = re.captures(haystack)
+      && re.is_match(haystack)
+      && let (Some(c), Some(d)) = (caps.get(1), caps.get(2))
+    {
+      found = Some((c.as_str(), d.as_str()))
     }
 
     Ok(found)
@@ -230,7 +228,7 @@ impl TaskList {
           None => None,
         },
         TaskUpdateAction::Edit(new_description) => {
-          task.description = Arc::from(new_description.as_str());
+          task.description = Arc::from(*new_description);
           Some(())
         }
       };

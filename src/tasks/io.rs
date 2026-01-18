@@ -1,6 +1,7 @@
 use crate::tasks::{GetTasksFilterOption, Task, TaskList, TaskUpdateAction};
 use anyhow::Result;
 use console::{Key, Term, style};
+use ctrlc;
 use std::{fmt::Write as FmtWrite, io::Write as IoWrite};
 
 pub struct TasksInteract<'a> {
@@ -25,11 +26,30 @@ impl<'a> TasksInteract<'a> {
   }
 
   pub fn interact(&mut self) -> Result<bool> {
+    match self.run_loop() {
+      Ok(ok) => Ok(ok),
+      Err(err) => {
+        // pretty hacky but I don't want to display
+        // this if the user ctrl-c aborts
+        if err.to_string() == "read interrupted" {
+          return Ok(false);
+        }
+        Err(err)
+      }
+    }
+  }
+
+  fn run_loop(&mut self) -> Result<bool> {
     self.term.hide_cursor()?;
+
+    ctrlc::set_handler(|| {
+      Term::stdout().show_cursor().expect("there was an error");
+    })?;
+
     loop {
       let tasks = &self.tasklist.get_tasks(&self.list_option);
 
-      let output = self.render(&tasks)?;
+      let output = self.render(tasks)?;
       self.term.clear_last_lines(self.height)?;
       self.height = output.lines().count();
       self.term.write_all(output.as_bytes())?;
@@ -44,7 +64,23 @@ impl<'a> TasksInteract<'a> {
           }
         }
         Key::Char('d') => {
-          self.update_task(&TaskUpdateAction::Delete, &tasks);
+          self
+            .tasklist
+            .update_task(&TaskUpdateAction::Delete, &tasks[self.cursor].description);
+        }
+        Key::Char('e') => {
+          self.term.clear_last_lines(self.height)?;
+          self.height = 0;
+          let new_desc = self.prompt("Description: ")?;
+          self.term.clear_last_lines(1)?;
+          let current_desc = &tasks[self.cursor].description;
+          if current_desc != &new_desc {
+            self
+              .tasklist
+              .update_task(&TaskUpdateAction::Edit(&new_desc), current_desc);
+
+            self.has_changes = true;
+          }
         }
         Key::Char('i') => {
           if let GetTasksFilterOption::Incomplete = self.list_option {
@@ -68,11 +104,14 @@ impl<'a> TasksInteract<'a> {
           }
         }
         Key::Char(' ') => {
-          self.update_task(&TaskUpdateAction::Toggle, &tasks);
+          self
+            .tasklist
+            .update_task(&TaskUpdateAction::Toggle, &tasks[self.cursor].description);
         }
         Key::Enter => {
           self.term.clear_last_lines(self.height)?;
           self.height = 0;
+          self.term.show_cursor()?;
           if self.has_changes {
             if self.confirm("Save changes?")? {
               return Ok(true);
@@ -86,6 +125,7 @@ impl<'a> TasksInteract<'a> {
         Key::Escape => {
           self.term.clear_last_lines(self.height)?;
           self.height = 0;
+          self.term.show_cursor()?;
           if self.has_changes {
             if self.confirm("Discard changes?")? {
               return Ok(false);
@@ -101,7 +141,7 @@ impl<'a> TasksInteract<'a> {
     }
   }
 
-  fn render(&self, tasks_to_print: &Vec<Task>) -> Result<String> {
+  fn render(&self, tasks_to_print: &[Task]) -> Result<String> {
     let mut output = String::new();
 
     for (i, task) in tasks_to_print.iter().enumerate() {
@@ -124,16 +164,8 @@ impl<'a> TasksInteract<'a> {
     Ok(output)
   }
 
-  fn update_task(&mut self, action: &TaskUpdateAction, tasks: &Vec<Task>) {
-    let _ = self
-      .tasklist
-      .update_task(action, &tasks[self.cursor].description);
-
-    self.has_changes = true;
-  }
-
-  fn prompt(&self, prompt: &str) -> Result<String> {
-    self.term.write_line(prompt)?;
+  fn prompt(&mut self, prompt: &str) -> Result<String> {
+    self.term.write_all(prompt.as_bytes())?;
     self.term.flush()?;
     let response = self.term.read_line()?;
 
