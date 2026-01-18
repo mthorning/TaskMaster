@@ -62,14 +62,14 @@ fn test_list_tasks() {
     },
   ]);
 
-  let all_tasks = tasklist.get_tasks(GetTasksFilterOption::All);
+  let all_tasks = tasklist.get_tasks(&GetTasksFilterOption::All);
   assert_eq!(all_tasks.len(), tasklist.tasks.len());
 
-  let completed_tasks = tasklist.get_tasks(GetTasksFilterOption::Completed);
+  let completed_tasks = tasklist.get_tasks(&GetTasksFilterOption::Completed);
   assert_eq!("two", &*completed_tasks[0].description);
   assert!(completed_tasks.len() == 1);
 
-  let incompleted_tasks = tasklist.get_tasks(GetTasksFilterOption::Incomplete);
+  let incompleted_tasks = tasklist.get_tasks(&GetTasksFilterOption::Incomplete);
   assert_eq!("one", &*incompleted_tasks[0].description);
   assert_eq!("three", &*incompleted_tasks[1].description);
   assert!(incompleted_tasks.len() == 2);
@@ -159,47 +159,4 @@ fn test_update_task() {
   ];
   tasklist.save_to_markdown(&mut lines).unwrap();
   assert_eq!(vec![String::from("- [ ] task to toggle"),], lines);
-}
-
-#[test]
-fn test_find_partial_matches() {
-  let tasklist = TaskList::from(vec![
-    Task {
-      is_completed: true,
-      description: String::from("This is a wibbly task"),
-    },
-    Task {
-      is_completed: false,
-      description: String::from("Another wibbly task"),
-    },
-    Task {
-      is_completed: false,
-      description: String::from("This is a wobbly task"),
-    },
-  ]);
-
-  assert_eq!(
-    2,
-    tasklist
-      .find_by_desc("wibbly", GetTasksFilterOption::All)
-      .len()
-  );
-  assert_eq!(
-    1,
-    tasklist
-      .find_by_desc("wibbly", GetTasksFilterOption::Completed)
-      .len()
-  );
-  assert_eq!(
-    1,
-    tasklist
-      .find_by_desc("wobbly", GetTasksFilterOption::All)
-      .len()
-  );
-  assert_eq!(
-    2,
-    tasklist
-      .find_by_desc("this", GetTasksFilterOption::All)
-      .len()
-  );
 }

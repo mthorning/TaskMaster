@@ -1,72 +1,58 @@
-use crate::tasks::{Task, TaskList, TaskUpdateAction};
+use crate::tasks::{GetTasksFilterOption, Task, TaskList, TaskUpdateAction};
 use anyhow::Result;
 use console::{Key, Term, style};
-use std::fmt::Write as FmtWrite;
-use std::io;
-use std::io::Write as IoWrite;
+use std::{fmt::Write as FmtWrite, io::Write as IoWrite};
 
-pub fn prompt_user(prompt: &str) -> String {
-  let term = Term::stdout();
-  println!("{}", prompt);
-  if let Err(err) = term.flush() {
-    eprintln!("{}", err);
-  }
-  let mut answer = String::new();
-  if let Err(err) = io::stdin().read_line(&mut answer) {
-    eprintln!("{}", err);
-  }
-
-  answer.trim().to_owned()
-}
-
-pub fn toggle_tasks(tasks: &mut Vec<Task>) -> Result<()> {
-  let selection = Vec::new();
-  for task in tasks.iter_mut() {
-    task.is_completed = selection.contains(&&task.description);
-  }
-  Ok(())
-}
-
-pub fn print_tasks(tasks: &Vec<Task>) {
-  let term = Term::stdout();
-  for task in tasks {
-    term
-      .write_line(&format!("{}", task.description))
-      .expect("Unable to write line");
-  }
-}
-
-pub struct TMConsole<'a> {
+pub struct TasksInteract<'a> {
   tasklist: &'a mut TaskList,
+  list_option: GetTasksFilterOption,
   term: Term,
   height: usize,
   cursor: usize,
+  has_changes: bool,
 }
 
-impl<'a> TMConsole<'a> {
-  pub fn new(tasklist: &'a mut TaskList) -> TMConsole<'a> {
-    TMConsole {
+impl<'a> TasksInteract<'a> {
+  pub fn new(tasklist: &'a mut TaskList) -> TasksInteract<'a> {
+    TasksInteract {
       tasklist,
+      list_option: GetTasksFilterOption::All,
       term: Term::stdout(),
       height: 0,
       cursor: 0,
+      has_changes: false,
     }
   }
 
-  pub fn tasks_interact(&mut self) -> Result<bool> {
+  pub fn interact(&mut self) -> Result<bool> {
     self.term.hide_cursor()?;
     loop {
-      let tasks = &self
-        .tasklist
-        .get_tasks(super::tasklist::GetTasksFilterOption::All);
+      let tasks = &self.tasklist.get_tasks(&self.list_option);
 
       let output = self.render(&tasks)?;
-      self.clear()?;
+      self.term.clear_last_lines(self.height)?;
+      self.height = output.lines().count();
       self.term.write_all(output.as_bytes())?;
       self.term.flush()?;
-      self.height = output.lines().count();
 
       match self.term.read_key()? {
+        Key::Char('c') => {
+          if let GetTasksFilterOption::Completed = self.list_option {
+            self.list_option = GetTasksFilterOption::All;
+          } else {
+            self.list_option = GetTasksFilterOption::Completed;
+          }
+        }
+        Key::Char('d') => {
+          self.update_task(&TaskUpdateAction::Delete, &tasks);
+        }
+        Key::Char('i') => {
+          if let GetTasksFilterOption::Incomplete = self.list_option {
+            self.list_option = GetTasksFilterOption::All;
+          } else {
+            self.list_option = GetTasksFilterOption::Incomplete;
+          }
+        }
         Key::Char('j') => {
           if self.cursor >= self.height - 1 {
             self.cursor = 0;
@@ -82,12 +68,34 @@ impl<'a> TMConsole<'a> {
           }
         }
         Key::Char(' ') => {
-          let _ = self
-            .tasklist
-            .update_task(&TaskUpdateAction::Toggle, &tasks[self.cursor].description);
+          self.update_task(&TaskUpdateAction::Toggle, &tasks);
         }
-        Key::Enter => return Ok(true),
-        Key::Escape => return Ok(false),
+        Key::Enter => {
+          self.term.clear_last_lines(self.height)?;
+          self.height = 0;
+          if self.has_changes {
+            if self.confirm("Save changes?")? {
+              return Ok(true);
+            } else {
+              self.term.clear_last_lines(1)?;
+              continue;
+            }
+          }
+          return Ok(false);
+        }
+        Key::Escape => {
+          self.term.clear_last_lines(self.height)?;
+          self.height = 0;
+          if self.has_changes {
+            if self.confirm("Discard changes?")? {
+              return Ok(false);
+            } else {
+              self.term.clear_last_lines(1)?;
+              continue;
+            }
+          }
+          return Ok(false);
+        }
         _ => {}
       }
     }
@@ -116,10 +124,29 @@ impl<'a> TMConsole<'a> {
     Ok(output)
   }
 
-  fn clear(&mut self) -> Result<()> {
-    self.term.clear_last_lines(self.height)?;
-    self.height = 0;
+  fn update_task(&mut self, action: &TaskUpdateAction, tasks: &Vec<Task>) {
+    let _ = self
+      .tasklist
+      .update_task(action, &tasks[self.cursor].description);
 
-    Ok(())
+    self.has_changes = true;
+  }
+
+  fn prompt(&self, prompt: &str) -> Result<String> {
+    self.term.write_line(prompt)?;
+    self.term.flush()?;
+    let response = self.term.read_line()?;
+
+    Ok(response.trim().to_owned())
+  }
+
+  fn confirm(&mut self, prompt: &str) -> Result<bool> {
+    self.term.write_line(&format!("{} [y/n]", prompt))?;
+    self.term.flush()?;
+    if let Key::Char('y') = self.term.read_key()? {
+      return Ok(true);
+    }
+
+    Ok(false)
   }
 }

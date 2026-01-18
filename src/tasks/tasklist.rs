@@ -2,8 +2,6 @@ use anyhow::{Result, anyhow};
 use regex::Regex;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::tasks::io;
-
 #[derive(Debug, PartialEq)]
 struct HashMapTask {
   is_completed: bool,
@@ -39,7 +37,7 @@ pub enum GetTasksFilterOption {
 pub enum TaskUpdateAction {
   Toggle,
   Delete,
-  Edit,
+  Edit(String),
 }
 
 const MD_RE: &'static str = r"-\s\[([\sx])\]\s(.+)";
@@ -56,6 +54,21 @@ impl TaskList {
     tasklist.set_tasks(tasks);
 
     tasklist
+  }
+
+  #[cfg(test)]
+  fn set_tasks(&mut self, tasks: Vec<Task>) {
+    for (i, task) in tasks.into_iter().enumerate() {
+      let description: Arc<str> = Arc::from(task.description);
+      self.tasks.insert(
+        description.clone(),
+        HashMapTask {
+          description,
+          is_completed: task.is_completed,
+          order: i,
+        },
+      );
+    }
   }
 
   pub fn from_markdown(md_lines: &Vec<String>) -> Result<TaskList> {
@@ -96,7 +109,7 @@ impl TaskList {
 
     let mut lines_to_remove: Vec<usize> = Vec::new();
 
-    // Edit tasks
+    // Update existing tasks
     for (i, line) in md_lines.iter_mut().enumerate() {
       let line_slice: &str = line.as_str();
 
@@ -147,7 +160,7 @@ impl TaskList {
     Ok(())
   }
 
-  pub fn get_tasks(&self, list_option: GetTasksFilterOption) -> Vec<Task> {
+  pub fn get_tasks(&self, list_option: &GetTasksFilterOption) -> Vec<Task> {
     struct HybridTask {
       order: usize,
       task: Task,
@@ -185,20 +198,6 @@ impl TaskList {
       .collect();
   }
 
-  pub fn set_tasks(&mut self, tasks: Vec<Task>) {
-    for (i, task) in tasks.into_iter().enumerate() {
-      let description: Arc<str> = Arc::from(task.description);
-      self.tasks.insert(
-        description.clone(),
-        HashMapTask {
-          description,
-          is_completed: task.is_completed,
-          order: i,
-        },
-      );
-    }
-  }
-
   fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
     let re = Regex::new(MD_RE)?;
 
@@ -230,8 +229,7 @@ impl TaskList {
           }
           None => None,
         },
-        TaskUpdateAction::Edit => {
-          let new_description = io::prompt_user("Enter the new description:");
+        TaskUpdateAction::Edit(new_description) => {
           task.description = Arc::from(new_description.as_str());
           Some(())
         }
@@ -240,19 +238,6 @@ impl TaskList {
       println!("Task not found")
     }
     None
-  }
-
-  pub fn find_by_desc(&self, partial_desc: &str, list_option: GetTasksFilterOption) -> Vec<Task> {
-    let tasks = self.get_tasks(list_option);
-    tasks
-      .into_iter()
-      .filter(|task| {
-        task
-          .description
-          .to_lowercase()
-          .contains(&partial_desc.to_lowercase())
-      })
-      .collect()
   }
 }
 

@@ -13,16 +13,12 @@ fn main() -> Result<()> {
   let cli = cli::Cli::parse();
 
   let md_file = markdown::File::from(TASKS_FILE);
-  let mut task_io = tasks::TaskIO::new(md_file)?;
+  let mut task_io = tasks::TaskController::new(md_file)?;
 
   match &cli.command {
     cli::Command::Tasks(task_cmd) => match &task_cmd.command {
       cli::TaskCommand::Add { description } => task_io.add(description)?,
-      cli::TaskCommand::List(args) => task_io.list(args.completed, args.all)?,
-      cli::TaskCommand::Toggle => task_io.toggle(true)?,
-      cli::TaskCommand::Complete => task_io.toggle(false)?,
-      cli::TaskCommand::Edit { partial_desc } => task_io.edit(&partial_desc)?,
-      cli::TaskCommand::Delete { partial_desc } => task_io.delete(&partial_desc)?,
+      cli::TaskCommand::List => task_io.list()?,
     },
     cli::Command::Status => unimplemented!(),
   }
