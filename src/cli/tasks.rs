@@ -9,6 +9,7 @@ pub struct TaskArgs {
 #[derive(Subcommand)]
 pub enum TaskCommand {
   /// Add a new task
+  #[command(alias = "a")]
   Add { description: String },
   /// List tasks
   #[command(alias = "l")]

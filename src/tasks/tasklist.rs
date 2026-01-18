@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow};
-use console::{StyledObject, style};
 use regex::Regex;
 use std::{collections::HashMap, sync::Arc};
 
@@ -252,20 +251,6 @@ impl TaskList {
           .description
           .to_lowercase()
           .contains(&partial_desc.to_lowercase())
-      })
-      .collect()
-  }
-
-  pub fn tasks_to_print(tasks: &Vec<Task>) -> Vec<StyledObject<String>> {
-    tasks
-      .iter()
-      .map(|task| {
-        if task.is_completed {
-          let description = style(task.description.clone()).strikethrough();
-          style(format!("● {}", description)).green()
-        } else {
-          style(format!("○ {}", task.description.clone())).white()
-        }
       })
       .collect()
   }

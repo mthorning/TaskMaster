@@ -27,24 +27,29 @@ impl<S: TaskListPersist> TaskIO<S> {
     Ok(())
   }
 
-  pub fn list(&mut self, completed: bool, all: bool) -> Result<()> {
-    let mut list_option = GetTasksFilterOption::Incomplete;
-    if completed {
-      list_option = GetTasksFilterOption::Completed;
-    } else if all {
-      list_option = GetTasksFilterOption::All;
-    }
+  pub fn list(&mut self, _completed: bool, _all: bool) -> Result<()> {
+    // let mut list_option = GetTasksFilterOption::Incomplete;
+    // if completed {
+    //   list_option = GetTasksFilterOption::Completed;
+    // } else if all {
+    //   list_option = GetTasksFilterOption::All;
+    // }
 
-    let task_type = match &list_option {
-      GetTasksFilterOption::All => "",
-      GetTasksFilterOption::Completed => " completed",
-      GetTasksFilterOption::Incomplete => " incomplete",
-    };
-    let tasks = self.tasklist.get_tasks(list_option);
-    if tasks.len() == 0 {
-      println!("No{} tasks found", task_type);
+    // let task_type = match &list_option {
+    //   GetTasksFilterOption::All => "",
+    //   GetTasksFilterOption::Completed => " completed",
+    //   GetTasksFilterOption::Incomplete => " incomplete",
+    // };
+    // let tasks = self.tasklist.get_tasks(list_option);
+    // if tasks.len() == 0 {
+    //   println!("No{} tasks found", task_type);
+    // }
+    // io::print_tasks(&tasks);
+    let mut console = io::TMConsole::new(&mut self.tasklist);
+    let should_save = console.tasks_interact()?;
+    if should_save {
+      self.save()?;
     }
-    io::print_tasks(&tasks);
 
     Ok(())
   }
