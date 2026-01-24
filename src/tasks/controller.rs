@@ -23,7 +23,7 @@ impl<S: TaskListPersist> TaskController<S> {
 
   pub fn list(&mut self) -> Result<()> {
     let mut console = io::TasksInteract::new(&mut self.tasklist);
-    let should_save = console.interact()?;
+    let should_save = io::TasksInteract::interact(&mut console)?;
     if should_save {
       self.save()?;
     }

@@ -214,9 +214,10 @@ impl TaskList {
   }
 
   pub fn update_task(&mut self, action: &TaskUpdateAction, description: &str) -> Option<()> {
-    if let Some(task) = self.tasks.get_mut(description) {
+    if self.tasks.contains_key(description) {
       return match action {
         TaskUpdateAction::Toggle => {
+          let task = self.tasks.get_mut(description).unwrap();
           task.is_completed = !task.is_completed;
           Some(())
         }
@@ -228,7 +229,19 @@ impl TaskList {
           None => None,
         },
         TaskUpdateAction::Edit(new_description) => {
-          task.description = Arc::from(*new_description);
+          // using desc as a key so need to remove the old and 
+          // add a new task
+          let old_task = self.tasks.remove(description).unwrap();
+
+          let new_description: Arc<str> = Arc::from(*new_description);
+          self.tasks.insert(
+            new_description.clone(),
+            HashMapTask {
+              description: new_description,
+              is_completed: old_task.is_completed,
+              order: old_task.order,
+            },
+          );
           Some(())
         }
       };
