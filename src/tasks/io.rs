@@ -2,16 +2,12 @@ use crate::tasks::{GetTasksFilterOption, Task, TaskList, TaskUpdateAction};
 use anyhow::Result;
 use console::{Key, Term, style};
 use ctrlc;
-use std::{fmt::Write as FmtWrite, io::Write as IoWrite};
+use std::{fmt::Write as FmtWrite, io::Write as IoWrite, thread, time::Duration};
 
+#[derive(Clone)]
 enum Mode {
-  Normal,
-  Insert,
-}
-
-enum OnInsert {
-  Edit,
-  Add,
+  List,
+  Edit(String),
 }
 
 pub struct TasksInteract<'a> {
@@ -22,9 +18,6 @@ pub struct TasksInteract<'a> {
   cursor: usize,
   has_changes: bool,
   mode: Mode,
-  on_insert: OnInsert,
-  insert_prompt: String,
-  insert_value: String,
 }
 
 impl<'a> TasksInteract<'a> {
@@ -36,10 +29,7 @@ impl<'a> TasksInteract<'a> {
       height: 0,
       cursor: 0,
       has_changes: false,
-      mode: Mode::Normal,
-      on_insert: OnInsert::Add,
-      insert_prompt: String::new(),
-      insert_value: String::new(),
+      mode: Mode::List,
     }
   }
 
@@ -70,19 +60,19 @@ impl<'a> TasksInteract<'a> {
 
   fn render_list_and_read(&mut self) -> Result<bool> {
     loop {
-      let tasks = &self.tasklist.get_tasks(&self.list_option);
-      match self.mode {
-        Mode::Normal => {
-          if let Some(should_save) = self.normal_mode(tasks)? {
+      match self.mode.clone() {
+        Mode::List => {
+          if let Some(should_save) = self.list_mode()? {
             return Ok(should_save);
           }
         }
-        Mode::Insert => self.insert_mode(tasks)?,
+        Mode::Edit(entered_val) => self.edit_mode(entered_val)?,
       }
     }
   }
 
-  fn normal_mode(&mut self, tasks: &[Task]) -> Result<Option<bool>> {
+  fn list_mode(&mut self) -> Result<Option<bool>> {
+    let tasks = &self.tasklist.get_tasks(&self.list_option);
     let output = self.render_list(tasks)?;
     self.term.clear_last_lines(self.height)?;
     self.height = output.lines().count();
@@ -104,10 +94,9 @@ impl<'a> TasksInteract<'a> {
           .update_task(&TaskUpdateAction::Delete, &tasks[self.cursor].description);
       }
       Key::Char('e') => {
-        self.on_insert = OnInsert::Edit;
         self.term.clear_last_lines(self.height)?;
-        self.insert_prompt = "Description: ".to_string();
-        self.mode = Mode::Insert;
+        self.height = 0;
+        self.mode = Mode::Edit(String::new());
       }
       Key::Char('i') => {
         if let GetTasksFilterOption::Incomplete = self.list_option {
@@ -153,42 +142,6 @@ impl<'a> TasksInteract<'a> {
     Ok(None)
   }
 
-  fn insert_mode(&mut self, tasks: &[Task]) -> Result<()> {
-    self.term.clear_line()?;
-    let output = format!("{}{}", self.insert_prompt, self.insert_value);
-    self.term.write_all(output.as_bytes())?;
-
-    let key = self.term.read_key()?;
-
-    match key {
-      Key::Enter => {
-        match self.on_insert {
-          OnInsert::Add => unimplemented!(),
-          OnInsert::Edit => {
-            let current_desc = &tasks[self.cursor].description;
-            if current_desc != &self.insert_value {
-              self
-                .tasklist
-                .update_task(&TaskUpdateAction::Edit(&self.insert_value), current_desc);
-
-              self.has_changes = true;
-            }
-          }
-        }
-
-        self.term.clear_line()?;
-        self.mode = Mode::Normal;
-      }
-      Key::Escape => unimplemented!(),
-      Key::Char(char) => {
-        self.insert_value = format!("{}{}", self.insert_value, char);
-      }
-      _ => {}
-    }
-
-    Ok(())
-  }
-
   fn render_list(&self, tasks_to_print: &[Task]) -> Result<String> {
     let mut output = String::new();
 
@@ -210,6 +163,42 @@ impl<'a> TasksInteract<'a> {
     }
 
     Ok(output)
+  }
+
+  fn edit_mode(&mut self, entered_val: String) -> Result<()> {
+    let output = format!("Description: {}", entered_val);
+    self.term.write_all(output.as_bytes())?;
+
+    let tasks = &self.tasklist.get_tasks(&self.list_option);
+    let key = self.term.read_key()?;
+
+    match key {
+      Key::Enter => {
+        let current_desc = &tasks[self.cursor].description;
+        if self.tasklist.has_task(&entered_val) {
+          self.term.clear_line()?;
+          self.term.write_all("Task already exists".as_bytes())?;
+          thread::sleep(Duration::new(2, 0));
+        } else {
+          self
+            .tasklist
+            .update_task(&TaskUpdateAction::Edit(&entered_val), current_desc);
+
+          self.has_changes = true;
+        }
+
+        self.term.clear_line()?;
+        self.mode = Mode::List;
+      }
+      Key::Escape => self.mode = Mode::List,
+      Key::Char(char) => {
+        self.mode = Mode::Edit(format!("{}{}", entered_val, char));
+        self.term.clear_line()?;
+      }
+      _ => {}
+    }
+
+    Ok(())
   }
 
   fn confirm(&mut self, prompt: &str) -> Result<bool> {

@@ -250,6 +250,10 @@ impl TaskList {
     }
     None
   }
+
+  pub fn has_task(&self, description: &str) -> bool {
+    self.tasks.contains_key(description)
+  }
 }
 
 #[cfg(test)]
