@@ -195,19 +195,24 @@ impl<'a> TasksInteract<'a> {
           self.has_changes = true;
         }
 
-        self.term.clear_line()?;
         self.mode = Mode::List;
       }
       Key::Escape => {
-        self.term.clear_line()?;
         self.mode = Mode::List
+      }
+      Key::Backspace => {
+        let mut new_val = entered_val.clone();
+        if !new_val.is_empty() {
+          new_val.truncate(new_val.len() - 1);
+          self.mode = Mode::Edit(new_val);
+        }
       }
       Key::Char(char) => {
         self.mode = Mode::Edit(format!("{}{}", entered_val, char));
-        self.term.clear_line()?;
       }
       _ => {}
     }
+    self.term.clear_line()?;
 
     Ok(())
   }
