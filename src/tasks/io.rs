@@ -126,16 +126,24 @@ impl<'a> TasksInteract<'a> {
         self.has_changes = true;
       }
       Key::Enter => {
-        if self.has_changes && self.confirm("Save changes?")? {
-          return Ok(Some(true));
-        }
-        return Ok(Some(false));
-      }
-      Key::Escape => {
-        if self.has_changes && self.confirm("Discard changes?")? {
+        if !self.has_changes {
           return Ok(Some(false));
         }
-        return Ok(Some(false));
+        if self.confirm("Save changes?")? {
+          return Ok(Some(true));
+        }
+        self.height += 1;
+        return Ok(None);
+      }
+      Key::Escape => {
+        if !self.has_changes {
+          return Ok(Some(false));
+        }
+        if self.confirm("Discard changes?")? {
+          return Ok(Some(false));
+        }
+        self.height += 1;
+        return Ok(None);
       }
       _ => {}
     }
@@ -190,7 +198,10 @@ impl<'a> TasksInteract<'a> {
         self.term.clear_line()?;
         self.mode = Mode::List;
       }
-      Key::Escape => self.mode = Mode::List,
+      Key::Escape => {
+        self.term.clear_line()?;
+        self.mode = Mode::List
+      }
       Key::Char(char) => {
         self.mode = Mode::Edit(format!("{}{}", entered_val, char));
         self.term.clear_line()?;
@@ -203,7 +214,7 @@ impl<'a> TasksInteract<'a> {
 
   fn confirm(&mut self, prompt: &str) -> Result<bool> {
     self.term.write_line(&format!("{} [y/n]", prompt))?;
-    if let Key::Char('y') = self.term.read_key()? {
+    if let Key::Char('y') | Key::Enter = self.term.read_key()? {
       return Ok(true);
     }
 
