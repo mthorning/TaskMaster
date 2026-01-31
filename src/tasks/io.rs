@@ -91,7 +91,7 @@ impl<'a> TasksInteract<'a> {
       Key::Char('d') => {
         self
           .tasklist
-          .update_task(&TaskUpdateAction::Delete, &tasks[self.cursor].description);
+          .update_task(TaskUpdateAction::Delete, &tasks[self.cursor].description);
       }
       Key::Char('e') => {
         self.term.clear_last_lines(self.height)?;
@@ -122,7 +122,7 @@ impl<'a> TasksInteract<'a> {
       Key::Char(' ') => {
         self
           .tasklist
-          .update_task(&TaskUpdateAction::Toggle, &tasks[self.cursor].description);
+          .update_task(TaskUpdateAction::Toggle, &tasks[self.cursor].description);
         self.has_changes = true;
       }
       Key::Enter => {
@@ -190,7 +190,7 @@ impl<'a> TasksInteract<'a> {
         } else {
           self
             .tasklist
-            .update_task(&TaskUpdateAction::Edit(&entered_val), current_desc);
+            .update_task(TaskUpdateAction::Edit(&entered_val), current_desc);
 
           self.has_changes = true;
         }

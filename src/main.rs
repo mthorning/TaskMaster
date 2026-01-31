@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use env_logger;
 
 mod cli;
 mod markdown;
@@ -17,7 +16,7 @@ fn main() -> Result<()> {
 
   match &cli.command {
     cli::Command::Tasks(task_cmd) => match &task_cmd.command {
-      cli::TaskCommand::Add { description } => task_io.add(description)?,
+      cli::TaskCommand::Add { description } => task_io.add(description.to_owned())?,
       cli::TaskCommand::List => task_io.list()?,
     },
     cli::Command::Status => unimplemented!(),

@@ -1,13 +1,7 @@
+use crate::tasks::hash_map_task::HashMapTask;
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use std::{collections::HashMap, sync::Arc};
-
-#[derive(Debug, PartialEq)]
-struct HashMapTask {
-  is_completed: bool,
-  description: Arc<str>,
-  order: usize,
-}
+use std::{collections::HashMap, mem, sync::Arc};
 
 #[derive(Debug)]
 pub struct Task {
@@ -24,7 +18,7 @@ pub struct TaskList {
 
 pub trait TaskListPersist {
   fn load_tasklist(&mut self) -> Result<TaskList>;
-  fn save_tasklist(&mut self, tasks: &TaskList) -> Result<()>;
+  fn save_tasklist(&mut self, tasks: &mut TaskList) -> Result<()>;
 }
 
 #[derive(PartialEq)]
@@ -59,15 +53,8 @@ impl TaskList {
   #[cfg(test)]
   fn set_tasks(&mut self, tasks: Vec<Task>) {
     for (i, task) in tasks.into_iter().enumerate() {
-      let description: Arc<str> = Arc::from(task.description);
-      self.tasks.insert(
-        description.clone(),
-        HashMapTask {
-          description,
-          is_completed: task.is_completed,
-          order: i,
-        },
-      );
+      let hmt = HashMapTask::from(task, i);
+      self.tasks.insert(hmt.description.clone(), hmt);
     }
   }
 
@@ -81,17 +68,15 @@ impl TaskList {
     let mut cursor = 0;
     for line in md_lines.iter() {
       if let Some((c, d)) = TaskList::get_md_captures(line)? {
-        let description = d.trim().to_string();
-        let desc_arc: Arc<str> = Arc::from(description);
-
-        task_list.tasks.insert(
-          desc_arc.clone(),
-          HashMapTask {
+        let hmt = HashMapTask::from(
+          Task {
+            description: d.trim().to_string(),
             is_completed: c != " ",
-            description: desc_arc,
-            order: cursor,
           },
+          cursor,
         );
+
+        task_list.tasks.insert(hmt.description.clone(), hmt);
         cursor += 1;
       }
     }
@@ -99,9 +84,11 @@ impl TaskList {
     Ok(task_list)
   }
 
-  pub fn save_to_markdown(&self, md_lines: &mut Vec<String>) -> Result<()> {
+  pub fn save_to_markdown(&mut self, md_lines: &mut Vec<String>) -> Result<()> {
+    let tasks = self.remap_to_original_keys();
+
     let update_line = |desc: &Arc<str>, line: &mut String| {
-      if let Some(task) = self.tasks.get(desc) {
+      if let Some(task) = tasks.get(desc) {
         let check = if task.is_completed { "x" } else { " " };
         *line = format!("- [{}] {}", check, task.description);
       }
@@ -115,7 +102,7 @@ impl TaskList {
 
       if let Some((_, description)) = TaskList::get_md_captures(line_slice)? {
         let desc_arc = Arc::from(description);
-        if self.tasks.contains_key(&desc_arc) {
+        if tasks.contains_key(&desc_arc) {
           update_line(&desc_arc, line);
         } else {
           lines_to_remove.push(i);
@@ -139,23 +126,21 @@ impl TaskList {
     Ok(())
   }
 
-  pub fn add_task(&mut self, description: &String) -> Result<()> {
-    let desc_arc = Arc::from(description.to_owned());
+  pub fn add_task(&mut self, description: String) -> Result<()> {
+    let hmt = HashMapTask::from(
+      Task {
+        description,
+        is_completed: false,
+      },
+      self.tasks.len(),
+    );
 
-    if self.tasks.contains_key(&desc_arc) {
+    if self.tasks.contains_key(&hmt.description) {
       return Err(anyhow!("Task already exists"));
     }
 
-    self.tasks.insert(
-      desc_arc.clone(),
-      HashMapTask {
-        description: desc_arc.clone(),
-        is_completed: false,
-        order: self.tasks.len(),
-      },
-    );
-
-    self.to_be_added.push(desc_arc);
+    self.to_be_added.push(hmt.description.clone());
+    self.tasks.insert(hmt.description.clone(), hmt);
 
     Ok(())
   }
@@ -168,13 +153,13 @@ impl TaskList {
 
     let mut hybrid_tasks: Vec<HybridTask> = Vec::new();
 
-    for h_task in self.tasks.values() {
+    for hmt in self.tasks.values() {
       hybrid_tasks.push(HybridTask {
         task: Task {
-          description: (*h_task.description).to_string(),
-          is_completed: h_task.is_completed,
+          description: hmt.description.to_string(),
+          is_completed: hmt.is_completed,
         },
-        order: h_task.order,
+        order: hmt.order,
       });
     }
 
@@ -198,22 +183,7 @@ impl TaskList {
       .collect()
   }
 
-  fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
-    let re = Regex::new(MD_RE)?;
-
-    let mut found = None;
-
-    if let Some(caps) = re.captures(haystack)
-      && re.is_match(haystack)
-      && let (Some(c), Some(d)) = (caps.get(1), caps.get(2))
-    {
-      found = Some((c.as_str(), d.as_str()))
-    }
-
-    Ok(found)
-  }
-
-  pub fn update_task(&mut self, action: &TaskUpdateAction, description: &str) -> Option<()> {
+  pub fn update_task(&mut self, action: TaskUpdateAction, description: &str) -> Option<()> {
     if self.tasks.contains_key(description) {
       return match action {
         TaskUpdateAction::Toggle => {
@@ -229,19 +199,11 @@ impl TaskList {
           None => None,
         },
         TaskUpdateAction::Edit(new_description) => {
-          // using desc as a key so need to remove the old and 
+          // using description as a key so need to remove the old and
           // add a new task
-          let old_task = self.tasks.remove(description).unwrap();
-
-          let new_description: Arc<str> = Arc::from(*new_description);
-          self.tasks.insert(
-            new_description.clone(),
-            HashMapTask {
-              description: new_description,
-              is_completed: old_task.is_completed,
-              order: old_task.order,
-            },
-          );
+          let mut hmt = self.tasks.remove(description).unwrap();
+          hmt.description = Arc::from(new_description);
+          self.tasks.insert(hmt.description.clone(), hmt);
           Some(())
         }
       };
@@ -254,6 +216,32 @@ impl TaskList {
   pub fn has_task(&self, description: &str) -> bool {
     self.tasks.contains_key(description)
   }
+
+  fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
+    let re = Regex::new(MD_RE)?;
+
+    let mut found = None;
+
+    if let Some(caps) = re.captures(haystack)
+      && re.is_match(haystack)
+      && let (Some(c), Some(d)) = (caps.get(1), caps.get(2))
+    {
+      found = Some((c.as_str(), d.as_str()))
+    }
+
+    Ok(found)
+  }
+
+  fn remap_to_original_keys(&mut self) -> HashMap<Arc<str>, HashMapTask> {
+    let old_map = mem::take(&mut self.tasks);
+    let mut new_map: HashMap<Arc<str>, HashMapTask> = HashMap::with_capacity(old_map.len());
+    for (_, hmt) in old_map {
+      new_map.insert(hmt.original.description.clone(), hmt);
+    }
+
+    new_map
+  }
+
 }
 
 #[cfg(test)]

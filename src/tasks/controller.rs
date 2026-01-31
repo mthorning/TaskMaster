@@ -13,7 +13,7 @@ impl<S: TaskListPersist> TaskController<S> {
     Ok(TaskController { storage, tasklist })
   }
 
-  pub fn add(&mut self, task_description: &String) -> Result<()> {
+  pub fn add(&mut self, task_description: String) -> Result<()> {
     self.tasklist.add_task(task_description)?;
     self.save()?;
     println!("Task added");
@@ -32,7 +32,7 @@ impl<S: TaskListPersist> TaskController<S> {
   }
 
   fn save(&mut self) -> Result<()> {
-    self.storage.save_tasklist(&self.tasklist)?;
+    self.storage.save_tasklist(&mut self.tasklist)?;
 
     Ok(())
   }
