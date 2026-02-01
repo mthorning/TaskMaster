@@ -8,6 +8,7 @@ use std::{fmt::Write as FmtWrite, io::Write as IoWrite, thread, time::Duration};
 enum Mode {
   List,
   Edit(String),
+  Add(String),
 }
 
 pub struct TasksInteract<'a> {
@@ -66,7 +67,8 @@ impl<'a> TasksInteract<'a> {
             return Ok(should_save);
           }
         }
-        Mode::Edit(entered_val) => self.edit_mode(entered_val)?,
+        Mode::Add(entered_val) => self.add_edit_mode(entered_val, false)?,
+        Mode::Edit(entered_val) => self.add_edit_mode(entered_val, true)?,
       }
     }
   }
@@ -81,6 +83,11 @@ impl<'a> TasksInteract<'a> {
     let key = self.term.read_key()?;
 
     match key {
+      Key::Char('a') => {
+        self.term.clear_last_lines(self.height)?;
+        self.height = 0;
+        self.mode = Mode::Add(String::new());
+      }
       Key::Char('c') => {
         if let GetTasksFilterOption::Completed = self.list_option {
           self.list_option = GetTasksFilterOption::All;
@@ -173,7 +180,7 @@ impl<'a> TasksInteract<'a> {
     Ok(output)
   }
 
-  fn edit_mode(&mut self, entered_val: String) -> Result<()> {
+  fn add_edit_mode(&mut self, entered_val: String, is_edit: bool) -> Result<()> {
     let output = format!("Description: {}", entered_val);
     self.term.write_all(output.as_bytes())?;
 
@@ -182,15 +189,21 @@ impl<'a> TasksInteract<'a> {
 
     match key {
       Key::Enter => {
-        let current_desc = &tasks[self.cursor].description;
         if self.tasklist.has_task(&entered_val) {
           self.term.clear_line()?;
           self.term.write_all("Task already exists".as_bytes())?;
           thread::sleep(Duration::new(2, 0));
-        } else {
+        } else if is_edit {
+          let current_desc = &tasks[self.cursor].description;
           self
             .tasklist
             .update_task(TaskUpdateAction::Edit(&entered_val), current_desc);
+
+          self.has_changes = true;
+        } else {
+          self
+            .tasklist
+            .add_task(entered_val)?;
 
           self.has_changes = true;
         }
@@ -204,11 +217,12 @@ impl<'a> TasksInteract<'a> {
         let mut new_val = entered_val.clone();
         if !new_val.is_empty() {
           new_val.truncate(new_val.len() - 1);
-          self.mode = Mode::Edit(new_val);
+          self.mode = if is_edit { Mode::Edit(new_val) } else { Mode::Add(new_val) }
         }
       }
       Key::Char(char) => {
-        self.mode = Mode::Edit(format!("{}{}", entered_val, char));
+        let val = format!("{}{}", entered_val, char);
+        self.mode = if is_edit { Mode::Edit(val) } else { Mode::Add(val) }
       }
       _ => {}
     }
