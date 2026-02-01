@@ -1,5 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
+use flexi_logger::{FileSpec, Logger, WriteMode};
+use log::info;
 
 mod cli;
 mod markdown;
@@ -8,7 +10,16 @@ mod tasks;
 const TASKS_FILE: &str = "tasks.md";
 
 fn main() -> Result<()> {
-  env_logger::init();
+  let _logger = Logger::try_with_env_or_str("info") // use RUST_LOG=debug for debug level
+    .unwrap()
+    .log_to_file(FileSpec::default().suppress_timestamp())
+    .write_mode(WriteMode::Direct)
+    .append()
+    .start()
+    .unwrap();
+
+  info!("Starting application");
+
   let cli = cli::Cli::parse();
 
   let md_file = markdown::File::from(TASKS_FILE);

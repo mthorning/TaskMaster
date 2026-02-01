@@ -1,7 +1,9 @@
-use crate::tasks::{GetTasksFilterOption, Task, TaskList, TaskUpdateAction};
+use crate::tasks::hash_map_task::{HashMapTaskType, Task};
+use crate::tasks::{GetTasksFilterOption, TaskList, TaskUpdateAction};
 use anyhow::Result;
-use console::{Key, Term, style};
+use console::{Key, StyledObject, Term, style};
 use ctrlc;
+use log::debug;
 use std::{fmt::Write as FmtWrite, io::Write as IoWrite, thread, time::Duration};
 
 #[derive(Clone)]
@@ -17,7 +19,6 @@ pub struct TasksInteract<'a> {
   term: Term,
   height: usize,
   cursor: usize,
-  has_changes: bool,
   mode: Mode,
 }
 
@@ -29,7 +30,6 @@ impl<'a> TasksInteract<'a> {
       term: Term::stdout(),
       height: 0,
       cursor: 0,
-      has_changes: false,
       mode: Mode::List,
     }
   }
@@ -38,8 +38,6 @@ impl<'a> TasksInteract<'a> {
     ctrlc::set_handler(|| {
       Term::stdout().show_cursor().expect("there was an error");
     })?;
-
-    self.term.hide_cursor()?;
 
     let result = match self.render_list_and_read() {
       Ok(ok) => Ok(ok),
@@ -74,14 +72,13 @@ impl<'a> TasksInteract<'a> {
   }
 
   fn list_mode(&mut self) -> Result<Option<bool>> {
+    self.term.hide_cursor()?;
     let tasks = &self.tasklist.get_tasks(&self.list_option);
-    let output = self.render_list(tasks)?;
-    self.term.clear_last_lines(self.height)?;
-    self.height = output.lines().count();
-    self.term.write_all(output.as_bytes())?;
+    self.render_list(tasks)?;
 
     let key = self.term.read_key()?;
 
+    debug!("list_mode: {:?}", key);
     match key {
       Key::Char('a') => {
         self.term.clear_last_lines(self.height)?;
@@ -103,7 +100,7 @@ impl<'a> TasksInteract<'a> {
       Key::Char('e') => {
         self.term.clear_last_lines(self.height)?;
         self.height = 0;
-        self.mode = Mode::Edit(String::new());
+        self.mode = Mode::Edit(tasks[self.cursor].description.clone());
       }
       Key::Char('i') => {
         if let GetTasksFilterOption::Incomplete = self.list_option {
@@ -130,12 +127,14 @@ impl<'a> TasksInteract<'a> {
         self
           .tasklist
           .update_task(TaskUpdateAction::Toggle, &tasks[self.cursor].description);
-        self.has_changes = true;
       }
       Key::Enter => {
-        if !self.has_changes {
+        if !self.tasklist.has_changes() {
+          debug!("Enter: tasklist has no change");
           return Ok(Some(false));
         }
+
+        self.render_diff()?;
         if self.confirm("Save changes?")? {
           return Ok(Some(true));
         }
@@ -143,9 +142,12 @@ impl<'a> TasksInteract<'a> {
         return Ok(None);
       }
       Key::Escape => {
-        if !self.has_changes {
+        if !self.tasklist.has_changes() {
+          debug!("Saved: tasklist has no change");
           return Ok(Some(false));
         }
+
+        self.render_diff()?;
         if self.confirm("Discard changes?")? {
           return Ok(Some(false));
         }
@@ -157,9 +159,75 @@ impl<'a> TasksInteract<'a> {
     Ok(None)
   }
 
-  fn render_list(&self, tasks_to_print: &[Task]) -> Result<String> {
-    let mut output = String::new();
+  fn add_edit_mode(&mut self, entered_val: String, is_edit: bool) -> Result<()> {
+    self.term.show_cursor()?;
+    let output = format!("Description: {}", entered_val);
+    self.term.write_all(output.as_bytes())?;
 
+    let tasks = &self.tasklist.get_tasks(&self.list_option);
+    let key = self.term.read_key()?;
+
+    debug!("add_edit_mode: {:?}", key);
+    match key {
+      Key::Enter => {
+        if self.tasklist.has_task(&entered_val) {
+          self.term.clear_line()?;
+          self.term.write_all("Task already exists".as_bytes())?;
+          thread::sleep(Duration::new(2, 0));
+        } else if is_edit {
+          let current_desc = &tasks[self.cursor].description;
+          self
+            .tasklist
+            .update_task(TaskUpdateAction::Edit(&entered_val), current_desc);
+        } else {
+          self.tasklist.add_task(entered_val)?;
+        }
+
+        self.mode = Mode::List;
+      }
+      Key::Escape => {
+        if entered_val.is_empty() {
+          self.mode = Mode::List;
+        } else {
+          self.mode = Mode::Edit(String::new());
+        }
+      }
+      Key::Backspace => {
+        let mut new_val = entered_val.clone();
+        if !new_val.is_empty() {
+          new_val.truncate(new_val.len() - 1);
+          self.mode = if is_edit {
+            Mode::Edit(new_val)
+          } else {
+            Mode::Add(new_val)
+          }
+        }
+      }
+      Key::Char(char) => {
+        let val = format!("{}{}", entered_val, char);
+        self.mode = if is_edit {
+          Mode::Edit(val)
+        } else {
+          Mode::Add(val)
+        }
+      }
+      _ => {}
+    }
+    self.term.clear_line()?;
+
+    Ok(())
+  }
+
+  fn render_list(&mut self, tasks_to_print: &[Task]) -> Result<()> {
+    self.term.clear_last_lines(self.height)?;
+
+    if tasks_to_print.is_empty() {
+      self.term.write_all("No tasks here\n".as_bytes())?;
+      self.height = 1;
+      return Ok(());
+    }
+
+    let mut output = String::new();
     for (i, task) in tasks_to_print.iter().enumerate() {
       if i == self.cursor {
         write!(&mut output, "{}", style("> ").cyan())?;
@@ -176,60 +244,96 @@ impl<'a> TasksInteract<'a> {
         writeln!(&mut output, "{}", task_str)?;
       }
     }
-
-    Ok(output)
-  }
-
-  fn add_edit_mode(&mut self, entered_val: String, is_edit: bool) -> Result<()> {
-    let output = format!("Description: {}", entered_val);
     self.term.write_all(output.as_bytes())?;
 
-    let tasks = &self.tasklist.get_tasks(&self.list_option);
-    let key = self.term.read_key()?;
-
-    match key {
-      Key::Enter => {
-        if self.tasklist.has_task(&entered_val) {
-          self.term.clear_line()?;
-          self.term.write_all("Task already exists".as_bytes())?;
-          thread::sleep(Duration::new(2, 0));
-        } else if is_edit {
-          let current_desc = &tasks[self.cursor].description;
-          self
-            .tasklist
-            .update_task(TaskUpdateAction::Edit(&entered_val), current_desc);
-
-          self.has_changes = true;
-        } else {
-          self
-            .tasklist
-            .add_task(entered_val)?;
-
-          self.has_changes = true;
-        }
-
-        self.mode = Mode::List;
-      }
-      Key::Escape => {
-        self.mode = Mode::List
-      }
-      Key::Backspace => {
-        let mut new_val = entered_val.clone();
-        if !new_val.is_empty() {
-          new_val.truncate(new_val.len() - 1);
-          self.mode = if is_edit { Mode::Edit(new_val) } else { Mode::Add(new_val) }
-        }
-      }
-      Key::Char(char) => {
-        let val = format!("{}{}", entered_val, char);
-        self.mode = if is_edit { Mode::Edit(val) } else { Mode::Add(val) }
-      }
-      _ => {}
-    }
-    self.term.clear_line()?;
+    self.height = output.lines().count();
 
     Ok(())
   }
+
+  fn render_diff(&mut self) -> Result<()> {
+    let mut output = String::new();
+
+    let make_dot = |is_completed: bool| if is_completed { "●" } else { "○" };
+
+    let make_desc = |is_completed: bool, description: String| {
+      let mut desc_style = style(description);
+      if is_completed {
+        desc_style = desc_style.strikethrough();
+      }
+      desc_style
+    };
+
+    for hmt in self
+      .tasklist
+      .get_hash_map_tasks(&GetTasksFilterOption::AllWithDeleted)
+    {
+      let task = hmt.get_task();
+      match hmt.task_type {
+        HashMapTaskType::Existing => {
+          let task_dot = style(make_dot(task.is_completed).to_string());
+          let task_desc = make_desc(task.is_completed, task.description.to_string());
+
+          let original_task = hmt.get_original_task();
+          if task != original_task {
+            let original_str = style(format!(
+              "{} {}",
+              make_dot(original_task.is_completed),
+              make_desc(
+                original_task.is_completed,
+                original_task.description.to_string()
+              ),
+            ))
+            .dim();
+
+            write!(&mut output, "{}", original_str)?;
+
+            let make_coloured =
+              |obj: StyledObject<String>, has_changed: bool| -> StyledObject<String> {
+                if has_changed { obj.dim() } else { obj.white() }
+              };
+
+            let coloured_dot =
+              make_coloured(task_dot, task.is_completed == original_task.is_completed);
+
+            let coloured_desc =
+              make_coloured(task_desc, task.description == original_task.description);
+
+            writeln!(&mut output, " {} {}", coloured_dot, coloured_desc)?;
+          } else {
+            writeln!(&mut output, "{} {}", task_dot.dim(), task_desc.dim())?;
+          }
+        }
+        HashMapTaskType::Deleted => {
+          let task_str = style(format!(
+            "{} {}",
+            make_dot(task.is_completed),
+            make_desc(task.is_completed, task.description.to_string())
+          ))
+          .red();
+
+          writeln!(&mut output, "{}", task_str)?;
+        }
+        HashMapTaskType::Added => {
+          let task_str = style(format!(
+            "{} {}",
+            make_dot(task.is_completed),
+            make_desc(task.is_completed, task.description.to_string())
+          ))
+          .green();
+
+          writeln!(&mut output, "{}", task_str)?;
+        }
+      }
+    }
+
+    self.term.clear_last_lines(self.height)?;
+    self.height = output.lines().count();
+    self.term.write_all(output.as_bytes())?;
+
+    Ok(())
+  }
+
 
   fn confirm(&mut self, prompt: &str) -> Result<bool> {
     self.term.write_line(&format!("{} [y/n]", prompt))?;

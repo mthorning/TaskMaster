@@ -1,19 +1,13 @@
-use crate::tasks::hash_map_task::HashMapTask;
+use crate::tasks::hash_map_task::{HashMapTask, HashMapTaskType, Task};
 use anyhow::{Result, anyhow};
+use log::{debug, info};
 use regex::Regex;
 use std::{collections::HashMap, mem, sync::Arc};
-
-#[derive(Debug)]
-pub struct Task {
-  pub is_completed: bool,
-  pub description: String,
-}
 
 #[derive(Debug, PartialEq)]
 pub struct TaskList {
   tasks: HashMap<Arc<str>, HashMapTask>,
-  to_be_added: Vec<Arc<str>>,
-  to_be_removed: Vec<Arc<str>>,
+  order_cursor: usize,
 }
 
 pub trait TaskListPersist {
@@ -24,6 +18,7 @@ pub trait TaskListPersist {
 #[derive(PartialEq)]
 pub enum GetTasksFilterOption {
   All,
+  AllWithDeleted,
   Completed,
   Incomplete,
 }
@@ -41,8 +36,7 @@ impl TaskList {
   fn from(tasks: Vec<Task>) -> TaskList {
     let mut tasklist = TaskList {
       tasks: HashMap::new(),
-      to_be_added: Vec::new(),
-      to_be_removed: Vec::new(),
+      order_cursor: tasks.len(),
     };
 
     tasklist.set_tasks(tasks);
@@ -54,18 +48,17 @@ impl TaskList {
   fn set_tasks(&mut self, tasks: Vec<Task>) {
     for (i, task) in tasks.into_iter().enumerate() {
       let hmt = HashMapTask::from(task, i);
-      self.tasks.insert(hmt.description.clone(), hmt);
+      self.tasks.insert(hmt.get_key(), hmt);
     }
   }
 
   pub fn from_markdown(md_lines: &[String]) -> Result<TaskList> {
-    let mut task_list = TaskList {
+    info!("loading tasks from markdown file");
+    let mut tasklist = TaskList {
       tasks: HashMap::new(),
-      to_be_added: Vec::new(),
-      to_be_removed: Vec::new(),
+      order_cursor: 0,
     };
 
-    let mut cursor = 0;
     for line in md_lines.iter() {
       if let Some((c, d)) = TaskList::get_md_captures(line)? {
         let hmt = HashMapTask::from(
@@ -73,37 +66,41 @@ impl TaskList {
             description: d.trim().to_string(),
             is_completed: c != " ",
           },
-          cursor,
+          tasklist.order_cursor,
         );
 
-        task_list.tasks.insert(hmt.description.clone(), hmt);
-        cursor += 1;
+        debug!("adding from md: {:?}", hmt);
+        tasklist.tasks.insert(hmt.get_key(), hmt);
+        tasklist.order_cursor += 1;
       }
     }
 
-    Ok(task_list)
+    Ok(tasklist)
   }
 
   pub fn save_to_markdown(&mut self, md_lines: &mut Vec<String>) -> Result<()> {
     let tasks = self.remap_to_original_keys();
+    info!("saving tasks to markdown: {:?}", tasks);
 
-    let update_line = |desc: &Arc<str>, line: &mut String| {
-      if let Some(task) = tasks.get(desc) {
-        let check = if task.is_completed { "x" } else { " " };
-        *line = format!("- [{}] {}", check, task.description);
-      }
+    let update_line = |task: Task, line: &mut String| {
+      debug!("updating md line for \"{}\"", task.description);
+      let check = if task.is_completed { "x" } else { " " };
+      *line = format!("- [{}] {}", check, task.description);
     };
 
     let mut lines_to_remove: Vec<usize> = Vec::new();
 
     // Update existing tasks
+    debug!("updating existing tasks...");
     for (i, line) in md_lines.iter_mut().enumerate() {
       let line_slice: &str = line.as_str();
 
       if let Some((_, description)) = TaskList::get_md_captures(line_slice)? {
-        let desc_arc = Arc::from(description);
-        if tasks.contains_key(&desc_arc) {
-          update_line(&desc_arc, line);
+        if let Some(hmt) = tasks.get(description)
+          && hmt.task_type != HashMapTaskType::Deleted
+        {
+          debug!("matched on \"{}\"; writing", &description);
+          update_line(hmt.get_task(), line);
         } else {
           lines_to_remove.push(i);
         }
@@ -111,89 +108,88 @@ impl TaskList {
     }
 
     // Remove deleted tasks
+    debug!("removing existing tasks...");
     lines_to_remove.reverse();
     lines_to_remove.into_iter().for_each(|i| {
+      debug!("matched on \"{}\"; to be removed", md_lines[i]);
       md_lines.remove(i);
     });
 
     // Add new tasks
-    for arc_desc in &self.to_be_added {
-      md_lines.push(String::new());
-      let last_line = md_lines.last_mut().unwrap();
-      update_line(arc_desc, last_line);
+    for hmt in tasks.values() {
+      if hmt.task_type == HashMapTaskType::Added {
+        debug!("adding line \"{}\"", hmt.get_task().description);
+        md_lines.push(String::new());
+        let last_line = md_lines.last_mut().unwrap();
+        update_line(hmt.get_task(), last_line);
+      }
     }
 
     Ok(())
   }
 
   pub fn add_task(&mut self, description: String) -> Result<()> {
-    let hmt = HashMapTask::from(
-      Task {
-        description,
-        is_completed: false,
-      },
-      self.tasks.len(),
-    );
+    let hmt = HashMapTask::new(description, self.order_cursor);
 
-    if self.tasks.contains_key(&hmt.description) {
+    let key = hmt.get_key();
+    if self.tasks.contains_key(&key) {
       return Err(anyhow!("Task already exists"));
     }
 
-    self.to_be_added.push(hmt.description.clone());
-    self.tasks.insert(hmt.description.clone(), hmt);
+    debug!("adding new task {:?}", hmt);
+    self.order_cursor += 1;
+    self.tasks.insert(key, hmt);
 
     Ok(())
   }
 
-  pub fn get_tasks(&self, list_option: &GetTasksFilterOption) -> Vec<Task> {
-    struct HybridTask {
-      order: usize,
-      task: Task,
-    }
-
-    let mut hybrid_tasks: Vec<HybridTask> = Vec::new();
+  pub fn get_hash_map_tasks(&self, list_option: &GetTasksFilterOption) -> Vec<&HashMapTask> {
+    let mut hmts = Vec::new();
 
     for hmt in self.tasks.values() {
-      hybrid_tasks.push(HybridTask {
-        task: Task {
-          description: hmt.description.to_string(),
-          is_completed: hmt.is_completed,
-        },
-        order: hmt.order,
-      });
+      match list_option {
+        GetTasksFilterOption::Incomplete => {
+          if hmt.task_type != HashMapTaskType::Deleted && !hmt.get_task().is_completed {
+            hmts.push(hmt);
+          }
+        }
+        GetTasksFilterOption::Completed => {
+          if hmt.task_type != HashMapTaskType::Deleted && hmt.get_task().is_completed {
+            hmts.push(hmt);
+          }
+        }
+        GetTasksFilterOption::All => {
+          if hmt.task_type != HashMapTaskType::Deleted {
+            hmts.push(hmt);
+          }
+        }
+        GetTasksFilterOption::AllWithDeleted => {
+          hmts.push(hmt);
+        }
+      }
     }
 
-    hybrid_tasks.sort_by(|a, b| a.order.cmp(&b.order));
+    hmts.sort();
 
-    let filtered_hybrid_tasks = match list_option {
-      GetTasksFilterOption::All => hybrid_tasks,
-      _ => hybrid_tasks
-        .into_iter()
-        .filter(|hybrid_task| match list_option {
-          GetTasksFilterOption::Completed => hybrid_task.task.is_completed,
-          GetTasksFilterOption::Incomplete => !hybrid_task.task.is_completed,
-          _ => unreachable!(),
-        })
-        .collect(),
-    };
+    hmts
+  }
 
-    filtered_hybrid_tasks
-      .into_iter()
-      .map(|fht| fht.task)
-      .collect()
+  pub fn get_tasks(&self, list_option: &GetTasksFilterOption) -> Vec<Task> {
+    let hmts = self.get_hash_map_tasks(list_option);
+    hmts.into_iter().map(|hmt| hmt.get_task()).collect()
   }
 
   pub fn update_task(&mut self, action: TaskUpdateAction, description: &str) -> Option<()> {
     if self.tasks.contains_key(description) {
       return match action {
         TaskUpdateAction::Toggle => {
-          let task = self.tasks.get_mut(description).unwrap();
-          task.is_completed = !task.is_completed;
+          let hmt = self.tasks.get_mut(description).unwrap();
+          hmt.toggle();
           Some(())
         }
-        TaskUpdateAction::Delete => match self.tasks.remove(description) {
-          Some(removed_task) => {
-            self.to_be_removed.push(removed_task.description);
+        TaskUpdateAction::Delete => match self.tasks.get_mut(description) {
+          Some(hmt) => {
+            hmt.delete();
             Some(())
           }
           None => None,
@@ -202,8 +198,8 @@ impl TaskList {
           // using description as a key so need to remove the old and
           // add a new task
           let mut hmt = self.tasks.remove(description).unwrap();
-          hmt.description = Arc::from(new_description);
-          self.tasks.insert(hmt.description.clone(), hmt);
+          let new_key = hmt.set_description(new_description);
+          self.tasks.insert(new_key, hmt);
           Some(())
         }
       };
@@ -215,6 +211,16 @@ impl TaskList {
 
   pub fn has_task(&self, description: &str) -> bool {
     self.tasks.contains_key(description)
+  }
+
+  pub fn has_changes(&self) -> bool {
+    for hmt in self.tasks.values() {
+      if hmt.task_type != HashMapTaskType::Existing || hmt.get_task() != hmt.get_original_task() {
+        return true;
+      }
+    }
+
+    false
   }
 
   fn get_md_captures(haystack: &str) -> Result<Option<(&str, &str)>> {
@@ -236,12 +242,11 @@ impl TaskList {
     let old_map = mem::take(&mut self.tasks);
     let mut new_map: HashMap<Arc<str>, HashMapTask> = HashMap::with_capacity(old_map.len());
     for (_, hmt) in old_map {
-      new_map.insert(hmt.original.description.clone(), hmt);
+      new_map.insert(hmt.get_original_key(), hmt);
     }
 
     new_map
   }
-
 }
 
 #[cfg(test)]

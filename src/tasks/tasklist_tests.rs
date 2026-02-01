@@ -30,18 +30,19 @@ fn test_from_markdown() {
 fn test_add_task() {
   let mut tasklist = TaskList::from(Vec::new());
 
-  if let Err(err) = tasklist.add_task(&String::from("test description")) {
+  if let Err(err) = tasklist.add_task(String::from("test description")) {
     panic!("{}", err);
   }
 
-  let task = tasklist
+  let hmt = tasklist
     .tasks
     .get("test description")
     .unwrap_or_else(|| panic!("Task is None"));
 
+  let task = hmt.get_task();
+
   assert_eq!("test description", &*task.description);
   assert!(task.is_completed == false);
-  assert_eq!(0, task.order);
   assert_eq!(1, tasklist.tasks.len());
 }
 
@@ -88,26 +89,11 @@ fn test_to_markdown() {
     },
   ]);
 
-  let orig_one = tasklist.tasks.get("one").unwrap();
-  tasklist.tasks.insert(
-    Arc::from("one"),
-    HashMapTask {
-      description: Arc::from("updated task"),
-      ..*orig_one
-    },
-  );
-
-  let orig_two = tasklist.tasks.get("two").unwrap();
-  tasklist.tasks.insert(
-    Arc::from("two"),
-    HashMapTask {
-      description: Arc::from("another updated task"),
-      ..*orig_two
-    },
-  );
+  tasklist.update_task(TaskUpdateAction::Edit("updated task"), "one");
+  tasklist.update_task(TaskUpdateAction::Edit("another updated task"), "two");
 
   tasklist
-    .add_task(&String::from("a whole new task"))
+    .add_task(String::from("a whole new task"))
     .unwrap();
 
   let mut test_lines = vec![
@@ -150,8 +136,8 @@ fn test_update_task() {
     },
   ]);
 
-  tasklist.update_task(&TaskUpdateAction::Toggle, &String::from("task to toggle"));
-  tasklist.update_task(&TaskUpdateAction::Delete, &String::from("task to delete"));
+  tasklist.update_task(TaskUpdateAction::Toggle, "task to toggle");
+  tasklist.update_task(TaskUpdateAction::Delete, "task to delete");
 
   let mut lines = vec![
     String::from("- [x] task to toggle"),
