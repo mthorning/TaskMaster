@@ -254,7 +254,13 @@ impl<'a> TasksInteract<'a> {
   fn render_diff(&mut self) -> Result<()> {
     let mut output = String::new();
 
-    let make_dot = |is_completed: bool| if is_completed { "●" } else { "○" };
+    let make_dot = |is_completed: bool| {
+      if is_completed {
+        style("●".to_string())
+      } else {
+        style("○".to_string())
+      }
+    };
 
     let make_desc = |is_completed: bool, description: String| {
       let mut desc_style = style(description);
@@ -271,38 +277,35 @@ impl<'a> TasksInteract<'a> {
       let task = hmt.get_task();
       match hmt.task_type {
         HashMapTaskType::Existing => {
-          let task_dot = style(make_dot(task.is_completed).to_string());
+          let make_coloured =
+            |obj: StyledObject<String>, has_changed: bool| -> StyledObject<String> {
+              if has_changed { obj.dim() } else { obj.white() }
+            };
+
+          let task_dot = make_dot(task.is_completed);
           let task_desc = make_desc(task.is_completed, task.description.to_string());
 
           let original_task = hmt.get_original_task();
-          if task != original_task {
-            let original_str = style(format!(
-              "{} {}",
-              make_dot(original_task.is_completed),
-              make_desc(
-                original_task.is_completed,
-                original_task.description.to_string()
-              ),
-            ))
-            .dim();
 
-            write!(&mut output, "{}", original_str)?;
+          write!(
+            &mut output,
+            "  {} ",
+            make_coloured(task_dot, task.is_completed == original_task.is_completed)
+          )?;
 
-            let make_coloured =
-              |obj: StyledObject<String>, has_changed: bool| -> StyledObject<String> {
-                if has_changed { obj.dim() } else { obj.white() }
-              };
-
-            let coloured_dot =
-              make_coloured(task_dot, task.is_completed == original_task.is_completed);
-
-            let coloured_desc =
-              make_coloured(task_desc, task.description == original_task.description);
-
-            writeln!(&mut output, " {} {}", coloured_dot, coloured_desc)?;
-          } else {
-            writeln!(&mut output, "{} {}", task_dot.dim(), task_desc.dim())?;
+          if task.description != original_task.description {
+            write!(
+              &mut output,
+              "{} ",
+              make_desc(task.is_completed, original_task.description.to_string()).dim()
+            )?;
           }
+
+          writeln!(
+            &mut output,
+            "{}",
+            make_coloured(task_desc, task.description == original_task.description),
+          )?;
         }
         HashMapTaskType::Deleted => {
           let task_str = style(format!(
@@ -333,7 +336,6 @@ impl<'a> TasksInteract<'a> {
 
     Ok(())
   }
-
 
   fn confirm(&mut self, prompt: &str) -> Result<bool> {
     self.term.write_line(&format!("{} [y/n]", prompt))?;
